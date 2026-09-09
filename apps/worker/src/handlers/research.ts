@@ -1,5 +1,12 @@
 import { renderReviewMarkdown } from '@ai-engine/domain';
-import { loadAgentPrompt, renderResearchFindings, runResearchAgent, runReviewAgent, type AgentRunOutcome } from '@ai-engine/agents';
+import {
+  loadAgentPrompt,
+  renderResearchFindings,
+  runResearchAgent,
+  runReviewAgent,
+  validateResearchFindings,
+  type AgentRunOutcome,
+} from '@ai-engine/agents';
 import { impactFromReview, ConflictEngine } from '@ai-engine/conflict-engine';
 import { KnowledgeService } from '@ai-engine/project-knowledge';
 import {
@@ -26,7 +33,7 @@ export async function handleResearch(context: JobContext): Promise<void> {
     mode: 'READ_ONLY',
   });
 
-  await context.orchestrator.transition({
+  await context.orchestrator.ensureState({
     taskId: context.task.id,
     to: 'ANALYZING',
     actor: { type: 'worker', id: context.workerId },
@@ -53,6 +60,17 @@ export async function handleResearch(context: JobContext): Promise<void> {
   }
 
   const projectContext = await buildProjectContext(context);
+
+  // A retry after an interruption reuses the findings that were already paid
+  // for, and continues with the review instead of researching the same commit
+  // a second time.
+  const existing = await context.repos.artifacts.latestByKind(context.task.id, 'research_findings_json');
+  if (existing) {
+    context.logger.info('reusing the research findings from an earlier attempt', { artifactId: existing.id });
+    const findings = validateResearchFindings(JSON.parse(await context.artifacts.getText(existing.id)));
+    await generateReview(context, { projectContext, findings, previousReview: null });
+    return;
+  }
 
   const researchPrompt = await loadAgentPrompt('research', context.project.repoPath);
   const researchVersionId = await resolveAgentVersion(context, 'research', researchPrompt);

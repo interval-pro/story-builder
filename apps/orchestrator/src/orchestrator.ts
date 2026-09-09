@@ -111,6 +111,20 @@ export class Orchestrator {
     });
   }
 
+  /**
+   * Moves the task into a state unless it is already there. A retried job re-runs
+   * its handler from the top, and repeating a transition that already happened
+   * is not an error, it is the normal shape of resuming.
+   */
+  async ensureState(input: TransitionInput): Promise<Task> {
+    const task = await createRepositories(this.db).tasks.getById(input.taskId);
+    if (task.state === input.to) {
+      this.logger.info('task already in the target state, continuing', { taskId: task.id, state: input.to });
+      return task;
+    }
+    return this.transition(input);
+  }
+
   /** Records a checkpoint so a new worker can resume without the old context. */
   async checkpoint(input: {
     taskId: string;

@@ -81,7 +81,7 @@ export async function handleQa(context: JobContext): Promise<void> {
   const sandbox = new SandboxClient(context.project.repoPath);
   await sandbox.setMode(context.task.id, 'READ_ONLY');
 
-  await context.orchestrator.transition({
+  await context.orchestrator.ensureState({
     taskId: context.task.id,
     to: 'QA_RUNNING',
     actor: { type: 'worker', id: context.workerId },

@@ -69,6 +69,21 @@ export class JobQueue {
     return row ? camelize<Job>(row) : null;
   }
 
+  /**
+   * Renews the lease of a job that is still being worked on. Agent runs take
+   * far longer than a lease, so without this the orchestrator reclaims work
+   * that never stopped and a second worker starts it again from the top.
+   * Returns false when the job is no longer ours, which means we must stop.
+   */
+  async heartbeat(jobId: string, workerId: string): Promise<boolean> {
+    const rows = await this.db.query(
+      `UPDATE jobs SET locked_at = now()
+       WHERE id = $1 AND locked_by = $2 AND status = 'RUNNING' RETURNING id`,
+      [jobId, workerId],
+    );
+    return rows.length > 0;
+  }
+
   async complete(jobId: string): Promise<void> {
     await this.db.query(
       `UPDATE jobs SET status = 'COMPLETED', completed_at = now(), locked_by = NULL, locked_at = NULL WHERE id = $1`,

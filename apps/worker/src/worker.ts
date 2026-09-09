@@ -49,6 +49,15 @@ export class Worker {
     const logger = this.logger.child({ jobId: job.id, jobType: job.jobType });
     logger.info('job claimed', { attempt: job.attempt });
 
+    // Renew the lease while the work is genuinely in progress.
+    const config = loadConfig();
+    const heartbeatMs = Math.max(30_000, Math.floor((config.service.jobLeaseSeconds * 1000) / 3));
+    const heartbeat = setInterval(() => {
+      void this.queue.heartbeat(job.id, this.workerId).then((held) => {
+        if (!held) logger.warn('the lease on this job was taken away while it was running');
+      });
+    }, heartbeatMs);
+
     try {
       await this.dispatch(job);
       await this.queue.complete(job.id);
@@ -57,6 +66,8 @@ export class Worker {
       const message = error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error);
       const { retrying } = await this.queue.fail(job.id, message);
       logger.error('job failed', { retrying, error });
+    } finally {
+      clearInterval(heartbeat);
     }
     return job;
   }

@@ -51,7 +51,7 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
   });
   await sandbox.setMode(context.task.id, 'READ_WRITE');
 
-  await context.orchestrator.transition({
+  await context.orchestrator.ensureState({
     taskId: context.task.id,
     to: mode === 'FIX' ? 'FIXING' : 'IMPLEMENTING',
     actor: { type: 'worker', id: context.workerId },
