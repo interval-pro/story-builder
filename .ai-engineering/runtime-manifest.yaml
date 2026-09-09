@@ -1,0 +1,49 @@
+project:
+  language:
+    - "typescript"
+  packageManager: npm
+
+setup:
+  commands:
+    - "npm ci"
+
+build:
+  commands:
+    - "npm run build"
+
+test:
+  commands:
+    - "npm test"
+
+lint:
+  commands:
+    - "npm run lint"
+    - "npm run typecheck"
+
+services:
+  - name: postgres
+    start: "docker compose up -d postgres"
+  - name: migrate
+    start: "docker compose up -d migrate"
+  - name: api
+    start: "docker compose up -d api"
+  - name: orchestrator
+    start: "docker compose up -d orchestrator"
+  - name: worker
+    start: "docker compose up -d worker"
+  - name: sandbox-manager
+    start: "docker compose up -d sandbox-manager"
+  - name: web
+    start: "docker compose up -d web"
+  - name: postgres-data
+    start: "docker compose up -d postgres-data"
+  - name: workspaces
+    start: "docker compose up -d workspaces"
+  - name: artifacts
+    start: "docker compose up -d artifacts"
+
+database:
+  migrate:
+    - "npm run migrate"
+  reset:
+    - "npm run db:reset"
