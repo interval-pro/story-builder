@@ -1,6 +1,6 @@
 import { validateResearchFindings, type ResearchFindings } from '@ai-engine/agents';
 import { AppError } from '@ai-engine/shared';
-import { buildProjectContext, createAiProvider, type JobContext } from '../job-context';
+import { buildProjectContext, type JobContext } from '../job-context';
 import { generateReview } from './research';
 
 /** Falls back to an empty findings object if the research artifact is missing. */
@@ -25,12 +25,10 @@ export async function handleReviewRegenerate(context: JobContext): Promise<void>
   if (!previousVersion) throw new AppError('no_review_version', 'This review has no versions yet', 409);
 
   const notes = await context.repos.reviews.listOpenNotes(review.id);
-  const provider = createAiProvider();
   const projectContext = await buildProjectContext(context);
   const findings = await loadFindings(context);
 
   await generateReview(context, {
-    provider,
     projectContext,
     findings,
     previousReview: { document: previousVersion.document, notes },
@@ -39,8 +37,7 @@ export async function handleReviewRegenerate(context: JobContext): Promise<void>
 
 /** Used when a review must be produced without re-running research. */
 export async function handleReviewGenerate(context: JobContext): Promise<void> {
-  const provider = createAiProvider();
   const projectContext = await buildProjectContext(context);
   const findings = await loadFindings(context);
-  await generateReview(context, { provider, projectContext, findings, previousReview: null });
+  await generateReview(context, { projectContext, findings, previousReview: null });
 }

@@ -6,6 +6,7 @@
   "scripts": { "build": "tsc -b", "start": "node dist/main.js" },
   "dependencies": {
     "@ai-engine/artifacts": "*",
+    "@ai-engine/claude-code": "*",
     "@ai-engine/conflict-engine": "*",
     "@ai-engine/db": "*",
     "@ai-engine/domain": "*",

@@ -1,17 +1,12 @@
-import { textMessage, type AiProvider } from '@ai-engine/ai-provider';
 import type { ReviewDocument, Story, StoryRevision, Task } from '@ai-engine/domain';
 import { renderReviewMarkdown } from '@ai-engine/domain';
-import type { ToolContext, ToolRegistry } from '@ai-engine/tools';
-import type { Logger } from '@ai-engine/shared';
-import { runAgentLoopWithStructuredResult, type AgentLoopResult } from '../agent-loop';
 import { renderProjectContext, renderStoryContext, renderTestResults, type ProjectContext } from '../context';
 import { loadAgentPrompt } from '../prompts/prompt-loader';
 import { validateQaReport, type QaReport } from '../schemas';
+import type { AgentRunOutcome, AgentRunner, AgentStep } from '../runner';
 
 export interface QaAgentInput {
-  provider: AiProvider;
-  registry: ToolRegistry;
-  toolContext: ToolContext;
+  runner: AgentRunner;
   projectContext: ProjectContext;
   story: Story;
   revision: StoryRevision;
@@ -22,8 +17,7 @@ export interface QaAgentInput {
   iteration: number;
   projectRoot: string;
   maxIterations?: number;
-  logger?: Logger;
-  onStep?: (step: { iteration: number; text: string; toolNames: string[] }) => Promise<void> | void;
+  onStep?: (step: AgentStep) => Promise<void> | void;
 }
 
 const RESULT_INSTRUCTION = `Now produce your QA verdict as a single JSON object with exactly this shape:
@@ -50,7 +44,9 @@ Return only the JSON object.`;
  * Independent review of the implementation. The QA agent gets a fresh context
  * and never sees the implementation agent's reasoning.
  */
-export async function runQaAgent(input: QaAgentInput): Promise<{ report: QaReport; loop: AgentLoopResult }> {
+export async function runQaAgent(
+  input: QaAgentInput,
+): Promise<{ report: QaReport; outcome: AgentRunOutcome<QaReport> }> {
   const instructions = await loadAgentPrompt('qa', input.projectRoot);
   const system = [
     instructions,
@@ -85,18 +81,16 @@ export async function runQaAgent(input: QaAgentInput): Promise<{ report: QaRepor
     'Review this change independently. Verify the claims in the diff against the code itself.',
   ].join('\n');
 
-  const { loop, result } = await runAgentLoopWithStructuredResult({
-    provider: input.provider,
-    registry: input.registry,
-    toolContext: input.toolContext,
+  const outcome = await input.runner.run({
+    phase: 'QA',
+    agentType: 'qa',
     system,
-    initialMessages: [textMessage('user', user)],
+    prompt: user,
     maxIterations: input.maxIterations ?? 30,
-    logger: input.logger,
-    onStep: input.onStep,
+    ...(input.onStep ? { onStep: input.onStep } : {}),
     resultInstruction: RESULT_INSTRUCTION,
     validate: validateQaReport,
   });
 
-  return { report: result, loop };
+  return { report: outcome.result, outcome };
 }

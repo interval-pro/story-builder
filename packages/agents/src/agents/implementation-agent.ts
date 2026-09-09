@@ -1,17 +1,12 @@
-import { textMessage, type AiProvider } from '@ai-engine/ai-provider';
 import type { QaFinding, ReviewDocument, RuntimeManifestDocument, Story, StoryRevision, Task } from '@ai-engine/domain';
 import { renderReviewMarkdown } from '@ai-engine/domain';
-import type { ToolContext, ToolRegistry } from '@ai-engine/tools';
-import type { Logger } from '@ai-engine/shared';
-import { runAgentLoopWithStructuredResult, type AgentLoopResult } from '../agent-loop';
 import { renderProjectContext, renderStoryContext, type ProjectContext } from '../context';
 import { loadAgentPrompt } from '../prompts/prompt-loader';
 import { validateImplementationOutcome, type ImplementationOutcome } from '../schemas';
+import type { AgentRunOutcome, AgentRunner, AgentStep } from '../runner';
 
 export interface ImplementationAgentInput {
-  provider: AiProvider;
-  registry: ToolRegistry;
-  toolContext: ToolContext;
+  runner: AgentRunner;
   projectContext: ProjectContext;
   story: Story;
   revision: StoryRevision;
@@ -23,8 +18,9 @@ export interface ImplementationAgentInput {
   qaFindings?: QaFinding[];
   qaIteration?: number;
   maxIterations?: number;
-  logger?: Logger;
-  onStep?: (step: { iteration: number; text: string; toolNames: string[] }) => Promise<void> | void;
+  /** Continues the earlier implementation session during a fix cycle. */
+  resumeSessionId?: string;
+  onStep?: (step: AgentStep) => Promise<void> | void;
 }
 
 const RESULT_INSTRUCTION = `Now report what you actually did, as a single JSON object with exactly this shape:
@@ -59,7 +55,7 @@ function renderRuntimeCommands(manifest: RuntimeManifestDocument | null): string
 /** Executes the approved plan inside the task sandbox. */
 export async function runImplementationAgent(
   input: ImplementationAgentInput,
-): Promise<{ outcome: ImplementationOutcome; loop: AgentLoopResult }> {
+): Promise<{ outcome: ImplementationOutcome; run: AgentRunOutcome<ImplementationOutcome> }> {
   const instructions = await loadAgentPrompt('implementation', input.projectRoot);
   const system = [
     instructions,
@@ -111,18 +107,17 @@ export async function runImplementationAgent(
     userParts.push('', 'Implement the approved plan, then run the build and the test suite.');
   }
 
-  const { loop, result } = await runAgentLoopWithStructuredResult({
-    provider: input.provider,
-    registry: input.registry,
-    toolContext: input.toolContext,
+  const run = await input.runner.run({
+    phase: 'IMPLEMENTATION',
+    agentType: 'implementation',
     system,
-    initialMessages: [textMessage('user', userParts.join('\n'))],
+    prompt: userParts.join('\n'),
     maxIterations: input.maxIterations ?? 60,
-    logger: input.logger,
-    onStep: input.onStep,
+    ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
+    ...(input.onStep ? { onStep: input.onStep } : {}),
     resultInstruction: RESULT_INSTRUCTION,
     validate: validateImplementationOutcome,
   });
 
-  return { outcome: result, loop };
+  return { outcome: run.result, run };
 }

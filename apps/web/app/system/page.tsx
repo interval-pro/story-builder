@@ -20,6 +20,9 @@ interface Health {
   status: string;
   database: boolean;
   sandboxManager: boolean;
+  agentEngine: string;
+  agentEngineReady: boolean;
+  claudeCliVersion: string | null;
   aiProvider: string;
   model: string;
   sandboxEnabled: boolean;
@@ -65,8 +68,9 @@ export default function SystemPage() {
           <div>Sandboxing: {health.sandboxEnabled ? 'docker' : 'host worktrees'}</div>
         </div>
         <div className="card">
-          <div className="meta">Model</div>
-          <div>{health.aiProvider}</div>
+          <div className="meta">Agent engine</div>
+          <div>{health.agentEngine}</div>
+          <div className="meta">{health.agentEngineReady ? health.claudeCliVersion ?? 'ready' : 'not available'}</div>
           <div className="meta">{health.model}</div>
         </div>
         <div className="card">

@@ -38,6 +38,16 @@ export interface ServiceConfig {
   jobLeaseSeconds: number;
 }
 
+export interface AgentEngineConfig {
+  /** Which execution engine runs the agents. */
+  engine: 'claude-code' | 'builtin';
+  /** Path or name of the Claude Code executable. */
+  claudeBinary: string;
+  /** Optional model override passed to the Claude CLI. */
+  claudeModel: string | undefined;
+  claudeTimeoutMs: number;
+}
+
 export interface GitHubConfig {
   token: string | undefined;
   apiBaseUrl: string;
@@ -48,6 +58,7 @@ export interface SystemConfig {
   ai: AiProviderConfig;
   paths: PathsConfig;
   service: ServiceConfig;
+  agents: AgentEngineConfig;
   github: GitHubConfig;
   sandbox: {
     enabled: boolean;
@@ -136,6 +147,12 @@ export function loadConfig(reload = false): SystemConfig {
       maxQaIterations: int('MAX_QA_ITERATIONS', 5),
       jobMaxAttempts: int('JOB_MAX_ATTEMPTS', 3),
       jobLeaseSeconds: int('JOB_LEASE_SECONDS', 900),
+    },
+    agents: {
+      engine: (str('AGENT_ENGINE', 'claude-code') as AgentEngineConfig['engine']),
+      claudeBinary: str('CLAUDE_BINARY', 'claude'),
+      claudeModel: optional('CLAUDE_MODEL'),
+      claudeTimeoutMs: int('CLAUDE_TIMEOUT_MS', 3_600_000),
     },
     github: {
       token: optional('GITHUB_TOKEN'),

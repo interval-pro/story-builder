@@ -10,6 +10,7 @@
     { "path": "../../packages/queue" },
     { "path": "../../packages/git" },
     { "path": "../../packages/artifacts" },
+    { "path": "../../packages/claude-code" },
     { "path": "../../packages/project-brain" },
     { "path": "../../packages/project-knowledge" },
     { "path": "../../packages/conflict-engine" },

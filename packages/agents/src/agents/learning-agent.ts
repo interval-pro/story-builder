@@ -1,12 +1,11 @@
-import { textMessage, type AiProvider } from '@ai-engine/ai-provider';
 import type { ReviewDocument, ReviewNote } from '@ai-engine/domain';
-import type { Logger } from '@ai-engine/shared';
 import { loadAgentPrompt } from '../prompts/prompt-loader';
 import { validateLearningResult, type LearningResult } from '../schemas';
 import { renderProjectContext, type ProjectContext } from '../context';
+import type { AgentRunner } from '../runner';
 
 export interface LearningAgentInput {
-  provider: AiProvider;
+  runner: AgentRunner;
   projectContext: ProjectContext;
   storyBody: string;
   notes: ReviewNote[];
@@ -14,7 +13,6 @@ export interface LearningAgentInput {
   reviewAfter: ReviewDocument | null;
   qaSummaries: string[];
   projectRoot: string;
-  logger?: Logger;
 }
 
 const RESULT_INSTRUCTION = `Produce a single JSON object with exactly this shape:
@@ -69,12 +67,15 @@ export async function runLearningAgent(input: LearningAgentInput): Promise<Learn
     'Existing principles are listed in your instructions; do not repeat one that is already there.',
   ].join('\n');
 
-  return input.provider.structuredOutput(
-    {
-      system,
-      messages: [textMessage('user', user), textMessage('user', RESULT_INSTRUCTION)],
-      temperature: 0,
-    },
-    validateLearningResult,
-  );
+  const outcome = await input.runner.run({
+    phase: 'FINAL_REPORT',
+    agentType: 'learning',
+    system,
+    prompt: user,
+    maxIterations: 4,
+    resultInstruction: RESULT_INSTRUCTION,
+    validate: validateLearningResult,
+  });
+
+  return outcome.result;
 }

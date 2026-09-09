@@ -1,19 +1,14 @@
-import { textMessage, type AiProvider } from '@ai-engine/ai-provider';
 import type { ReviewDocument, ReviewNote, Story, StoryRevision, Task } from '@ai-engine/domain';
 import { REVIEW_SECTIONS, REVIEW_SECTION_TITLES, validateReviewDocument as checkReviewDocument } from '@ai-engine/domain';
-import type { ToolContext, ToolRegistry } from '@ai-engine/tools';
-import type { Logger } from '@ai-engine/shared';
-import { runAgentLoopWithStructuredResult, type AgentLoopResult } from '../agent-loop';
 import { renderProjectContext, renderReviewWithNotes, renderStoryContext, type ProjectContext } from '../context';
 import { loadAgentPrompt } from '../prompts/prompt-loader';
 import { validateReviewDocument } from '../schemas';
 import { renderResearchFindings } from './research-agent';
 import type { ResearchFindings } from '../schemas';
+import type { AgentRunOutcome, AgentRunner, AgentStep } from '../runner';
 
 export interface ReviewAgentInput {
-  provider: AiProvider;
-  registry: ToolRegistry;
-  toolContext: ToolContext;
+  runner: AgentRunner;
   projectContext: ProjectContext;
   story: Story;
   revision: StoryRevision;
@@ -23,8 +18,7 @@ export interface ReviewAgentInput {
   /** Present when regenerating after human notes. */
   previousReview?: { document: ReviewDocument; notes: ReviewNote[] };
   maxIterations?: number;
-  logger?: Logger;
-  onStep?: (step: { iteration: number; text: string; toolNames: string[] }) => Promise<void> | void;
+  onStep?: (step: AgentStep) => Promise<void> | void;
 }
 
 function resultInstruction(): string {
@@ -50,7 +44,7 @@ Return only the JSON object.`;
 /** Produces the engineering review, either the first version or a regeneration. */
 export async function runReviewAgent(
   input: ReviewAgentInput,
-): Promise<{ document: ReviewDocument; loop: AgentLoopResult; problems: string[] }> {
+): Promise<{ document: ReviewDocument; outcome: AgentRunOutcome<ReviewDocument>; problems: string[] }> {
   const instructions = await loadAgentPrompt('review', input.projectRoot);
   const system = [
     instructions,
@@ -81,18 +75,16 @@ export async function runReviewAgent(
     userParts.push('', 'Write the engineering review for this story.');
   }
 
-  const { loop, result } = await runAgentLoopWithStructuredResult({
-    provider: input.provider,
-    registry: input.registry,
-    toolContext: input.toolContext,
+  const outcome = await input.runner.run({
+    phase: 'REVIEW',
+    agentType: 'review',
     system,
-    initialMessages: [textMessage('user', userParts.join('\n'))],
+    prompt: userParts.join('\n'),
     maxIterations: input.maxIterations ?? 25,
-    logger: input.logger,
-    onStep: input.onStep,
+    ...(input.onStep ? { onStep: input.onStep } : {}),
     resultInstruction: resultInstruction(),
     validate: validateReviewDocument,
   });
 
-  return { document: result, loop, problems: checkReviewDocument(result) };
+  return { document: outcome.result, outcome, problems: checkReviewDocument(outcome.result) };
 }

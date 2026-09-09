@@ -22,6 +22,22 @@ Docker access, cluster access, privilege escalation, changing Git remotes,
 pushing without an approval, piping downloaded scripts into a shell, reading
 credential files, and writing outside the task workspace.
 
+## How the phases map onto Claude Code
+
+When the agents run as headless Claude Code sessions, the capability model is
+translated into the CLI's own permission flags.
+
+| Phase | Flags |
+| --- | --- |
+| Research, Review | `--restricted`, editing tools denied |
+| QA, Final report | `--restricted`, editing tools denied |
+| Implementation, Integration | `--permission-mode acceptEdits`, push, remote, sudo, docker and kubectl denied |
+| Push | `--restricted`, everything denied; the system pushes, not the agent |
+
+`--restricted` removes the tools that run commands or code, so a read-only phase
+has no write tool to attempt in the first place. In Docker mode the workspace is
+also mounted read-only underneath, so the guarantee does not rest on a flag alone.
+
 ## Secrets
 
 Raw secrets never enter a model prompt. Tool output is scrubbed before it is

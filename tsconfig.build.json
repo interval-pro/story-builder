@@ -13,6 +13,7 @@
     { "path": "packages/ai-provider" },
     { "path": "packages/tools" },
     { "path": "packages/agents" },
+    { "path": "packages/claude-code" },
     { "path": "packages/project-brain" },
     { "path": "packages/project-knowledge" },
     { "path": "packages/conflict-engine" },

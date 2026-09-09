@@ -1,12 +1,12 @@
 import { AppError } from '@ai-engine/shared';
 import type { QaFinding } from '@ai-engine/domain';
-import { conversationTranscript, loadAgentPrompt, runImplementationAgent } from '@ai-engine/agents';
+import { loadAgentPrompt, runImplementationAgent } from '@ai-engine/agents';
 import { ConflictEngine } from '@ai-engine/conflict-engine';
 import { changedFiles, GitClient } from '@ai-engine/git';
 import {
   buildProjectContext,
-  createAiProvider,
-  createToolEnvironment,
+  createAgentRunner,
+  recordEngineMetrics,
   resolveAgentVersion,
   workspacePathFor,
   type JobContext,
@@ -19,6 +19,13 @@ async function approvedReviewDocument(context: JobContext) {
     throw new AppError('not_approved', 'This task has no approved review, so implementation cannot start', 409);
   }
   return context.repos.reviews.getVersion(versionId);
+}
+
+/** The session id of the last implementation run, so a fix keeps its context. */
+async function lastImplementationSession(context: JobContext): Promise<string | null> {
+  const artifact = await context.repos.artifacts.latestByKind(context.task.id, 'implementation_transcript');
+  const sessionId = artifact?.metadata['sessionId'];
+  return typeof sessionId === 'string' && sessionId.length > 0 ? sessionId : null;
 }
 
 /** Findings the QA agent raised in the previous iteration and are still open. */
@@ -52,7 +59,6 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
 
   const approved = await approvedReviewDocument(context);
   const qaFindings = mode === 'FIX' ? await openQaFindings(context) : [];
-  const provider = createAiProvider();
   const projectContext = await buildProjectContext(context);
   const manifest = await context.repos.runtimeManifests.latest(context.project.id);
 
@@ -66,17 +72,12 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
   });
 
   try {
-    const { registry, toolContext } = await createToolEnvironment({
-      context,
-      runId: run.id,
-      phase: 'IMPLEMENTATION',
-      allowWeb: false,
-    });
+    const runner = await createAgentRunner({ context, runId: run.id, phase: 'IMPLEMENTATION', allowWeb: false });
+    // A fix cycle continues the session that wrote the code in the first place.
+    const previousSessionId = mode === 'FIX' ? await lastImplementationSession(context) : null;
 
-    const { outcome, loop } = await runImplementationAgent({
-      provider,
-      registry,
-      toolContext,
+    const { outcome, run: agentRun } = await runImplementationAgent({
+      runner,
       projectContext,
       story: context.story,
       revision: context.revision,
@@ -85,7 +86,7 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
       runtimeManifest: manifest?.manifest ?? null,
       projectRoot: context.project.repoPath,
       ...(qaFindings.length > 0 ? { qaFindings, qaIteration: context.task.qaIteration } : {}),
-      logger: context.logger,
+      ...(previousSessionId ? { resumeSessionId: previousSessionId } : {}),
     });
 
     await context.artifacts.put({
@@ -102,7 +103,8 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
       runId: run.id,
       kind: 'implementation_transcript',
       contentType: 'text/markdown',
-      content: conversationTranscript(loop.messages),
+      content: agentRun.transcript,
+      metadata: { sessionId: agentRun.sessionId },
     });
 
     // The implementation may have discovered impact the review did not predict.
@@ -142,7 +144,8 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
       });
     }
 
-    await context.repos.runs.complete(run.id, loop.usage);
+    await context.repos.runs.complete(run.id, agentRun.usage);
+    await recordEngineMetrics(context, 'implementation', agentRun);
     await context.orchestrator.checkpoint({
       taskId: context.task.id,
       runId: run.id,

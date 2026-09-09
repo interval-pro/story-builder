@@ -38,8 +38,15 @@ npm run ai-engine -- init --repo /absolute/path/to/your/repository
 
 Then open http://localhost:3000 and write a story.
 
-Without an API key the system runs with the mock provider: the whole lifecycle
-works end to end, but the agents produce placeholder documents.
+By default the agents run as headless Claude Code sessions inside the task
+worktree, using the login your `claude` CLI already has. No API key is involved.
+Set `AGENT_ENGINE=builtin` to use the in-process tool loop instead, which needs
+`AI_PROVIDER` and `AI_API_KEY`; with `AI_PROVIDER=mock` the whole lifecycle runs
+offline with placeholder documents.
+
+Because the CLI reads its credentials from your home directory, run the worker
+as your own user on the host. Running it inside a container also requires the
+CLI in the image and the credentials mounted in.
 
 ## Layout
 
@@ -59,6 +66,7 @@ packages/
   queue/            the Postgres job queue
   artifacts/        artifact storage, out of Postgres
   ai-provider/      Anthropic, OpenAI and mock adapters
+  claude-code/      runs each agent as a headless Claude Code session
   tools/            the tool layer that every agent action goes through
   agents/           research, review, implementation, QA and learning
   project-brain/    principles and invariants learned from your corrections
@@ -142,7 +150,8 @@ ones that change behaviour most:
 | Variable | Meaning |
 | --- | --- |
 | `PROJECT_ROOT` | The repository this installation manages |
-| `AI_PROVIDER` | `anthropic`, `openai` or `mock` |
+| `AGENT_ENGINE` | `claude-code` (default) or `builtin` |
+| `AI_PROVIDER` | Only for the builtin engine: `anthropic`, `openai` or `mock` |
 | `SANDBOX_DOCKER_ENABLED` | `false` runs tasks in host worktrees instead of containers |
 | `MAX_QA_ITERATIONS` | How many fix cycles before a task is blocked |
 | `GITHUB_TOKEN` | Without it the system stops at a local branch |

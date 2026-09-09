@@ -1,11 +1,11 @@
 import { AppError, loadConfig } from '@ai-engine/shared';
-import { conversationTranscript, loadAgentPrompt, runQaAgent } from '@ai-engine/agents';
+import { loadAgentPrompt, runQaAgent } from '@ai-engine/agents';
 import { fullDiff, GitClient } from '@ai-engine/git';
 import {
   buildProjectContext,
-  createAiProvider,
+  createAgentRunner,
   createExecutor,
-  createToolEnvironment,
+  recordEngineMetrics,
   resolveAgentVersion,
   workspacePathFor,
   type JobContext,
@@ -106,17 +106,11 @@ export async function handleQa(context: JobContext): Promise<void> {
     const git = new GitClient(workspacePathFor(context.task.id));
     const diff = await fullDiff(git, context.task.baseCommit);
 
-    const { registry, toolContext } = await createToolEnvironment({
-      context,
-      runId: run.id,
-      phase: 'QA',
-      allowWeb: false,
-    });
+    // QA gets a fresh session on purpose: it must not see the implementation's reasoning.
+    const runner = await createAgentRunner({ context, runId: run.id, phase: 'QA', allowWeb: false });
 
-    const { report, loop } = await runQaAgent({
-      provider: createAiProvider(),
-      registry,
-      toolContext,
+    const { report, outcome } = await runQaAgent({
+      runner,
       projectContext: await buildProjectContext(context),
       story: context.story,
       revision: context.revision,
@@ -126,7 +120,6 @@ export async function handleQa(context: JobContext): Promise<void> {
       testResults,
       iteration,
       projectRoot: context.project.repoPath,
-      logger: context.logger,
     });
 
     const testsFailed = testResults.some((result) => result.exitCode !== 0);
@@ -182,9 +175,10 @@ export async function handleQa(context: JobContext): Promise<void> {
       runId: run.id,
       kind: 'qa_transcript',
       contentType: 'text/markdown',
-      content: conversationTranscript(loop.messages),
+      content: outcome.transcript,
     });
-    await context.repos.runs.complete(run.id, loop.usage);
+    await context.repos.runs.complete(run.id, outcome.usage);
+    await recordEngineMetrics(context, 'qa', outcome);
     await context.repos.tasks.update(context.task.id, { qaIteration: iteration });
 
     await context.events.append({

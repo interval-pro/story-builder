@@ -1,5 +1,6 @@
 import { HttpRouter, loadConfig, RESPONSE_HANDLED } from '@ai-engine/shared';
 import { GitClient } from '@ai-engine/git';
+import { claudeCliAvailable } from '@ai-engine/claude-code';
 import { checkBaseDrift } from '@ai-engine/conflict-engine';
 import { primaryProjectId, type ApiContext } from '../context';
 
@@ -14,12 +15,19 @@ export function registerSystemRoutes(router: HttpRouter, context: ApiContext): v
     } catch {
       sandboxManager = false;
     }
+    // The engine that actually runs the agents, and whether it is usable.
+    const engine = config.agents.engine;
+    const cli = engine === 'claude-code' ? await claudeCliAvailable(config.agents.claudeBinary) : { available: true, version: null };
+
     return {
       status: 'ok',
       database: await context.db.healthy(),
       sandboxManager,
+      agentEngine: engine,
+      agentEngineReady: cli.available,
+      claudeCliVersion: cli.version,
       aiProvider: config.ai.provider,
-      model: config.ai.model,
+      model: config.agents.claudeModel ?? config.ai.model,
       sandboxEnabled: config.sandbox.enabled,
     };
   });

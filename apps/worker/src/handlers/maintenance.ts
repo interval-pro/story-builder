@@ -6,7 +6,7 @@ import { ConflictEngine } from '@ai-engine/conflict-engine';
 import { GitClient } from '@ai-engine/git';
 import { writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { buildProjectContext, createAiProvider, createExecutor, type JobContext } from '../job-context';
+import { buildProjectContext, createAgentRunner, createExecutor, type JobContext } from '../job-context';
 import { SandboxClient } from '../sandbox-client';
 
 const logger = createLogger('maintenance');
@@ -24,8 +24,13 @@ export async function handleLearning(context: JobContext): Promise<void> {
   const versions = await context.repos.reviews.listVersions(engineering.id);
   const qaRuns = await context.repos.qaRuns.listByTask(context.task.id);
 
+  const learningRun = await context.repos.runs.start({
+    taskId: context.task.id,
+    phase: 'FINAL_REPORT',
+    agentType: 'learning',
+  });
   const result = await runLearningAgent({
-    provider: createAiProvider(),
+    runner: await createAgentRunner({ context, runId: learningRun.id, phase: 'FINAL_REPORT' }),
     projectContext: await buildProjectContext(context),
     storyBody: context.revision.body,
     notes,
@@ -33,8 +38,8 @@ export async function handleLearning(context: JobContext): Promise<void> {
     reviewAfter: versions[versions.length - 1]?.document ?? null,
     qaSummaries: qaRuns.flatMap((run) => run.findings.map((finding) => finding.summary)),
     projectRoot: context.project.repoPath,
-    logger: context.logger,
   });
+  await context.repos.runs.complete(learningRun.id);
 
   for (const principle of result.principles) {
     const { principle: stored, created } = await context.brain.recordPrinciple(context.project.id, principle, {

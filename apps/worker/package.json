@@ -9,6 +9,7 @@
     "@ai-engine/agents": "*",
     "@ai-engine/ai-provider": "*",
     "@ai-engine/artifacts": "*",
+    "@ai-engine/claude-code": "*",
     "@ai-engine/conflict-engine": "*",
     "@ai-engine/db": "*",
     "@ai-engine/domain": "*",

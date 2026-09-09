@@ -1,0 +1,13 @@
+{
+  "name": "@ai-engine/claude-code",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": { "build": "tsc -b" },
+  "dependencies": {
+    "@ai-engine/agents": "*",
+    "@ai-engine/domain": "*",
+    "@ai-engine/shared": "*"
+  }
+}

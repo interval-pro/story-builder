@@ -1,24 +1,18 @@
-import { textMessage, type AiProvider } from '@ai-engine/ai-provider';
 import type { Story, StoryRevision, Task } from '@ai-engine/domain';
-import type { ToolContext, ToolRegistry } from '@ai-engine/tools';
-import type { Logger } from '@ai-engine/shared';
-import { runAgentLoopWithStructuredResult, type AgentLoopResult } from '../agent-loop';
 import { renderProjectContext, renderStoryContext, type ProjectContext } from '../context';
 import { loadAgentPrompt } from '../prompts/prompt-loader';
 import { validateResearchFindings, type ResearchFindings } from '../schemas';
+import type { AgentRunOutcome, AgentRunner, AgentStep } from '../runner';
 
 export interface ResearchAgentInput {
-  provider: AiProvider;
-  registry: ToolRegistry;
-  toolContext: ToolContext;
+  runner: AgentRunner;
   projectContext: ProjectContext;
   story: Story;
   revision: StoryRevision;
   task: Task;
   projectRoot: string;
   maxIterations?: number;
-  logger?: Logger;
-  onStep?: (step: { iteration: number; text: string; toolNames: string[] }) => Promise<void> | void;
+  onStep?: (step: AgentStep) => Promise<void> | void;
 }
 
 const RESULT_INSTRUCTION = `Now produce your findings as a single JSON object with exactly this shape:
@@ -41,7 +35,7 @@ Return only the JSON object.`;
 /** Read-only repository research. The first stage of every task. */
 export async function runResearchAgent(
   input: ResearchAgentInput,
-): Promise<{ findings: ResearchFindings; loop: AgentLoopResult }> {
+): Promise<{ findings: ResearchFindings; outcome: AgentRunOutcome<ResearchFindings> }> {
   const instructions = await loadAgentPrompt('research', input.projectRoot);
   const system = [
     instructions,
@@ -54,30 +48,23 @@ export async function runResearchAgent(
     'Use the tools to inspect it. Never claim behaviour you have not read.',
   ].join('\n');
 
-  const { loop, result } = await runAgentLoopWithStructuredResult({
-    provider: input.provider,
-    registry: input.registry,
-    toolContext: input.toolContext,
+  const outcome = await input.runner.run({
+    phase: 'RESEARCH',
+    agentType: 'research',
     system,
-    initialMessages: [
-      textMessage(
-        'user',
-        [
-          renderStoryContext(input.story, input.revision, input.task),
-          '',
-          'Research this story against the repository. Work through the code until you can explain',
-          'the current behaviour end to end, then report what you found.',
-        ].join('\n'),
-      ),
-    ],
+    prompt: [
+      renderStoryContext(input.story, input.revision, input.task),
+      '',
+      'Research this story against the repository. Work through the code until you can explain',
+      'the current behaviour end to end, then report what you found.',
+    ].join('\n'),
     maxIterations: input.maxIterations ?? 40,
-    logger: input.logger,
-    onStep: input.onStep,
+    ...(input.onStep ? { onStep: input.onStep } : {}),
     resultInstruction: RESULT_INSTRUCTION,
     validate: validateResearchFindings,
   });
 
-  return { findings: result, loop };
+  return { findings: outcome.result, outcome };
 }
 
 /** Renders findings for the review agent prompt. */

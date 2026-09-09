@@ -1,11 +1,11 @@
 import { renderReviewMarkdown } from '@ai-engine/domain';
-import { conversationTranscript, loadAgentPrompt, renderResearchFindings, runResearchAgent, runReviewAgent } from '@ai-engine/agents';
+import { loadAgentPrompt, renderResearchFindings, runResearchAgent, runReviewAgent, type AgentRunOutcome } from '@ai-engine/agents';
 import { impactFromReview, ConflictEngine } from '@ai-engine/conflict-engine';
 import { KnowledgeService } from '@ai-engine/project-knowledge';
 import {
   buildProjectContext,
-  createAiProvider,
-  createToolEnvironment,
+  createAgentRunner,
+  recordEngineMetrics,
   resolveAgentVersion,
   type JobContext,
 } from '../job-context';
@@ -52,7 +52,6 @@ export async function handleResearch(context: JobContext): Promise<void> {
     });
   }
 
-  const provider = createAiProvider();
   const projectContext = await buildProjectContext(context);
 
   const researchPrompt = await loadAgentPrompt('research', context.project.repoPath);
@@ -65,22 +64,15 @@ export async function handleResearch(context: JobContext): Promise<void> {
   });
 
   try {
-    const { registry, toolContext } = await createToolEnvironment({
-      context,
-      runId: researchRun.id,
-      phase: 'RESEARCH',
-    });
+    const runner = await createAgentRunner({ context, runId: researchRun.id, phase: 'RESEARCH' });
 
-    const { findings, loop } = await runResearchAgent({
-      provider,
-      registry,
-      toolContext,
+    const { findings, outcome } = await runResearchAgent({
+      runner,
       projectContext,
       story: context.story,
       revision: context.revision,
       task: context.task,
       projectRoot: context.project.repoPath,
-      logger: context.logger,
     });
 
     await context.artifacts.put({
@@ -106,9 +98,10 @@ export async function handleResearch(context: JobContext): Promise<void> {
       runId: researchRun.id,
       kind: 'research_transcript',
       contentType: 'text/markdown',
-      content: conversationTranscript(loop.messages),
+      content: outcome.transcript,
     });
-    await context.repos.runs.complete(researchRun.id, loop.usage);
+    await context.repos.runs.complete(researchRun.id, outcome.usage);
+    await recordEngineMetrics(context, 'research', outcome);
     await context.events.append({
       projectId: context.project.id,
       taskId: context.task.id,
@@ -119,12 +112,7 @@ export async function handleResearch(context: JobContext): Promise<void> {
       payload: { files: findings.relevantFiles.length, openQuestions: findings.openQuestions.length },
     });
 
-    await generateReview(context, {
-      provider,
-      projectContext,
-      findings,
-      previousReview: null,
-    });
+    await generateReview(context, { projectContext, findings, previousReview: null });
   } catch (error) {
     await context.repos.runs.fail(researchRun.id, error instanceof Error ? error.message : String(error));
     throw error;
@@ -135,7 +123,6 @@ export async function handleResearch(context: JobContext): Promise<void> {
 export async function generateReview(
   context: JobContext,
   input: {
-    provider: ReturnType<typeof createAiProvider>;
     projectContext: Awaited<ReturnType<typeof buildProjectContext>>;
     findings: Awaited<ReturnType<typeof runResearchAgent>>['findings'];
     previousReview: Parameters<typeof runReviewAgent>[0]['previousReview'] | null;
@@ -151,16 +138,10 @@ export async function generateReview(
   });
 
   try {
-    const { registry, toolContext } = await createToolEnvironment({
-      context,
-      runId: reviewRun.id,
-      phase: 'REVIEW',
-    });
+    const runner = await createAgentRunner({ context, runId: reviewRun.id, phase: 'REVIEW' });
 
-    const { document, loop, problems } = await runReviewAgent({
-      provider: input.provider,
-      registry,
-      toolContext,
+    const { document, outcome, problems } = await runReviewAgent({
+      runner,
       projectContext: input.projectContext,
       story: context.story,
       revision: context.revision,
@@ -168,7 +149,6 @@ export async function generateReview(
       findings: input.findings,
       projectRoot: context.project.repoPath,
       ...(input.previousReview ? { previousReview: input.previousReview } : {}),
-      logger: context.logger,
     });
 
     if (problems.length > 0) {
@@ -202,9 +182,10 @@ export async function generateReview(
       runId: reviewRun.id,
       kind: 'review_transcript',
       contentType: 'text/markdown',
-      content: conversationTranscript(loop.messages),
+      content: outcome.transcript,
     });
-    await context.repos.runs.complete(reviewRun.id, loop.usage);
+    await context.repos.runs.complete(reviewRun.id, outcome.usage);
+    await recordEngineMetrics(context, 'review', outcome);
 
     await context.orchestrator.transition({
       taskId: context.task.id,
