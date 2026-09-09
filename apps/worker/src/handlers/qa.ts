@@ -92,7 +92,7 @@ export async function handleQa(context: JobContext): Promise<void> {
   const approved = await context.repos.reviews.getVersion(approvedVersionId);
 
   const iteration = context.task.qaIteration + 1;
-  const prompt = await loadAgentPrompt('qa', context.project.repoPath);
+  const prompt = await loadAgentPrompt('qa', context.installRoot);
   const agentVersionId = await resolveAgentVersion(context, 'qa', prompt);
   const run = await context.repos.runs.start({
     taskId: context.task.id,
@@ -119,7 +119,7 @@ export async function handleQa(context: JobContext): Promise<void> {
       diff,
       testResults,
       iteration,
-      projectRoot: context.project.repoPath,
+      installRoot: context.installRoot,
     });
 
     const testsFailed = testResults.some((result) => result.exitCode !== 0);

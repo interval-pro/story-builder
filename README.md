@@ -1,7 +1,12 @@
 # AI Engineering System
 
-An engineering process in which AI participates as several engineers, installed
-into one Git repository and working only on that project.
+An engineering process in which AI participates as several engineers. It is a
+layer installed beside one Git repository, working only on that project.
+
+The layer and the project are two separate things. The layer is a clone of a
+released version living outside your repository, by default under
+`~/.story-builder/<name>`. Your repository only gains a marker naming the
+installation that serves it, a runtime manifest and a place for its own rules.
 
 The system is not an agent you ask for a feature. It is a lifecycle with human
 gates:
@@ -30,13 +35,26 @@ services outside Docker.
 ## Getting started
 
 ```bash
-cp .env.example .env          # set PROJECT_ROOT, AI_PROVIDER and AI_API_KEY
-docker compose build
-docker compose up -d
-npm run ai-engine -- init --repo /absolute/path/to/your/repository
+curl -fsSL https://raw.githubusercontent.com/interval-pro/story-builder/main/install.sh -o install.sh
+chmod +x install.sh
+./install.sh --repo /absolute/path/to/your/repository
 ```
 
-Then open http://localhost:3000 and write a story.
+That clones the latest release into `~/.story-builder/<name>`, builds it, starts
+Postgres and points the installation at your repository. Then start it:
+
+```bash
+cd ~/.story-builder/<name>
+./scripts/dev-up.sh
+```
+
+Open http://localhost:3000 and write a story.
+
+Ask what you are running and whether it has drifted from upstream:
+
+```bash
+node apps/cli/dist/main.js version
+```
 
 By default the agents run as headless Claude Code sessions inside the task
 worktree, using the login your `claude` CLI already has. No API key is involved.

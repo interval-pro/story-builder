@@ -1,7 +1,14 @@
 import path from 'node:path';
 import { failure, heading, info } from './output';
 import { initCommand } from './commands/init';
-import { exportCommand, importCommand, startCommand, statusCommand, stopCommand } from './commands/lifecycle';
+import {
+  exportCommand,
+  importCommand,
+  startCommand,
+  statusCommand,
+  stopCommand,
+  versionCommand,
+} from './commands/lifecycle';
 import { storyCreateCommand, taskListCommand, taskShowCommand } from './commands/story';
 
 interface ParsedArgs {
@@ -35,7 +42,8 @@ function parseArgs(argv: string[]): ParsedArgs {
 function usage(): void {
   heading('ai-engine');
   info(`
-  ai-engine init [--repo <path>] [--skip-docker]   Install the system into a repository
+  ai-engine init --repo <path> [--skip-docker]     Point this installation at a repository
+  ai-engine version                                Show the installed version and upstream drift
   ai-engine start                                  Start the stack with docker compose
   ai-engine stop                                   Stop the stack
   ai-engine status                                 Show system and task status
@@ -44,7 +52,7 @@ function usage(): void {
   ai-engine task show <taskId>
   ai-engine export <file>                          Export the portable project state
   ai-engine import <file>                          Import a previously exported state
-  ai-engine update                                 Show how to upgrade the vendored system
+  ai-engine update                                 Show how to move to a newer release
   ai-engine rollback                               Show how to roll back to a known-good version
 `);
 }
@@ -52,10 +60,13 @@ function usage(): void {
 async function main(): Promise<number> {
   const { command, positional, flags } = parseArgs(process.argv.slice(2));
   const repoPath = path.resolve(String(flags['repo'] ?? process.env['PROJECT_ROOT'] ?? process.cwd()));
+  const installRoot = path.resolve(String(flags['install-root'] ?? process.env['INSTALL_ROOT'] ?? process.cwd()));
 
   switch (command) {
     case 'init':
-      return initCommand({ repoPath, skipDocker: Boolean(flags['skip-docker']) });
+      return initCommand({ repoPath, installRoot, skipDocker: Boolean(flags['skip-docker']) });
+    case 'version':
+      return versionCommand();
     case 'start':
       return startCommand(repoPath);
     case 'stop':
@@ -99,13 +110,12 @@ async function main(): Promise<number> {
       return importCommand(path.resolve(source));
     }
     case 'update':
-      info('\nThe system is vendored in .ai-engineering. Install a candidate version side by side under');
-      info('.ai-engineering/versions/<version>, run its migrations and self tests, and only then switch');
-      info('the "current" pointer. The active version is never overwritten in place.\n');
+      info('\nThe installation is a Git clone of a release. Fetch the new tag inside it, build it, run the');
+      info('migrations and only then restart. Local changes made by a story survive as an ordinary merge.\n');
       return 0;
     case 'rollback':
-      info('\nSwitch .ai-engineering/current back to a known-good version and restore the state snapshot');
-      info('that was taken before the upgrade. At least three known-good versions are kept.\n');
+      info('\nCheck the previous release tag out inside the installation, rebuild it and restore the state');
+      info('snapshot taken before the upgrade.\n');
       return 0;
     case 'help':
     case '--help':

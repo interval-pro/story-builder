@@ -37,7 +37,7 @@ export async function handleLearning(context: JobContext): Promise<void> {
     reviewBefore: versions[0]?.document ?? null,
     reviewAfter: versions[versions.length - 1]?.document ?? null,
     qaSummaries: qaRuns.flatMap((run) => run.findings.map((finding) => finding.summary)),
-    projectRoot: context.project.repoPath,
+    installRoot: context.installRoot,
   });
   await context.repos.runs.complete(learningRun.id);
 

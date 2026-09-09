@@ -9,20 +9,33 @@ ROOT="$(pwd)"
 ENV_FILE="${ENV_FILE:-.env.local}"
 
 if [ ! -f "$ENV_FILE" ]; then
-  echo "Missing $ENV_FILE. Copy .env.example and set PROJECT_ROOT." >&2
+  echo "Missing $ENV_FILE. Run ./install.sh --repo <path> or copy .env.example." >&2
   exit 1
 fi
 
 set -a; . "./$ENV_FILE"; set +a
+
+# Worktrees and artifacts belong to the installation, not to the repository
+# being worked on, so they default to here rather than to PROJECT_ROOT.
+export INSTALL_ROOT="${INSTALL_ROOT:-$ROOT}"
+export WORKSPACES_ROOT="${WORKSPACES_ROOT:-$INSTALL_ROOT/.ai-workspaces}"
+export ARTIFACTS_ROOT="${ARTIFACTS_ROOT:-$INSTALL_ROOT/.artifacts}"
+PG_CONTAINER="${PG_CONTAINER:-ai-engine-postgres}"
+PG_PORT="${PG_PORT:-5433}"
 mkdir -p "$WORKSPACES_ROOT" "$ARTIFACTS_ROOT" .run
 
-echo "-> Postgres"
-if ! docker ps --format '{{.Names}}' | grep -q '^ai-engine-postgres$'; then
-  docker start ai-engine-postgres >/dev/null 2>&1 || docker run -d --name ai-engine-postgres \
-    -e POSTGRES_USER=ai_engine -e POSTGRES_PASSWORD=ai_engine -e POSTGRES_DB=ai_engine \
-    -p 5433:5432 postgres:16-alpine >/dev/null
+if [ -z "${PROJECT_ROOT:-}" ]; then
+  echo "PROJECT_ROOT is not set in $ENV_FILE. The installation does not know which repository to work on." >&2
+  exit 1
 fi
-until docker exec ai-engine-postgres pg_isready -U ai_engine -d ai_engine >/dev/null 2>&1; do sleep 1; done
+
+echo "-> Postgres"
+if ! docker ps --format '{{.Names}}' | grep -q "^${PG_CONTAINER}$"; then
+  docker start "$PG_CONTAINER" >/dev/null 2>&1 || docker run -d --name "$PG_CONTAINER" \
+    -e POSTGRES_USER=ai_engine -e POSTGRES_PASSWORD=ai_engine -e POSTGRES_DB=ai_engine \
+    -p "${PG_PORT}:5432" postgres:16-alpine >/dev/null
+fi
+until docker exec "$PG_CONTAINER" pg_isready -U ai_engine -d ai_engine >/dev/null 2>&1; do sleep 1; done
 
 echo "-> Migrations"
 node packages/db/dist/cli/migrate.js
@@ -54,6 +67,7 @@ start web sh -c "cd apps/web && NEXT_PUBLIC_API_BASE_URL='${API_BASE_URL:-http:/
 until curl -sf "${API_BASE_URL:-http://localhost:4000}/api/health" >/dev/null 2>&1; do sleep 1; done
 
 echo
+echo "Project:  $PROJECT_ROOT"
 echo "Cockpit: http://localhost:3000"
 curl -s "${API_BASE_URL:-http://localhost:4000}/api/health"
 echo

@@ -15,7 +15,7 @@ export interface QaAgentInput {
   diff: string;
   testResults: { command: string; exitCode: number; output: string }[];
   iteration: number;
-  projectRoot: string;
+  installRoot: string;
   maxIterations?: number;
   onStep?: (step: AgentStep) => Promise<void> | void;
 }
@@ -47,7 +47,7 @@ Return only the JSON object.`;
 export async function runQaAgent(
   input: QaAgentInput,
 ): Promise<{ report: QaReport; outcome: AgentRunOutcome<QaReport> }> {
-  const instructions = await loadAgentPrompt('qa', input.projectRoot);
+  const instructions = await loadAgentPrompt('qa', input.installRoot);
   const system = [
     instructions,
     '',

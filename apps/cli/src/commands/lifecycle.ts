@@ -6,7 +6,9 @@ import { loadConfig } from '@ai-engine/shared';
 import { createRepositories, Database } from '@ai-engine/db';
 import { JobQueue } from '@ai-engine/queue';
 import { failure, heading, info, step, success, table, warn } from '../output';
-import { readInstalledVersion, SYSTEM_VERSION } from './init';
+import { GitClient, readInstallationVersion } from '@ai-engine/git';
+import { fetchLatestRelease } from '@ai-engine/github';
+import { SYSTEM_VERSION } from './init';
 
 const execFileAsync = promisify(execFile);
 
@@ -38,9 +40,12 @@ export async function statusCommand(repoPath: string): Promise<number> {
   const config = loadConfig();
   heading('AI Engineering System - status');
 
-  const installed = await readInstalledVersion(repoPath);
+  const version = await describeInstallation();
   table([
-    ['Installed version', installed ?? 'not installed'],
+    ['Installation', config.paths.installRoot],
+    ['Version', version.tag ?? version.commit.slice(0, 10)],
+    ['Latest release', version.latestRelease ?? 'unknown'],
+    ['Version state', VERSION_LABELS[version.state] ?? version.state],
     ['CLI version', SYSTEM_VERSION],
     ['AI provider', `${config.ai.provider} (${config.ai.model})`],
     ['Sandboxing', config.sandbox.enabled ? 'docker' : 'host worktrees'],
@@ -175,11 +180,40 @@ export async function importCommand(source: string): Promise<number> {
   }
 }
 
-/** Lists the versions installed side by side under .ai-engineering/versions. */
-export async function listVersions(repoPath: string): Promise<string[]> {
-  try {
-    return (await readdir(path.join(repoPath, '.ai-engineering', 'versions'))).sort();
-  } catch {
-    return [];
+/** Reads what this installation runs and how it compares to the newest release. */
+export async function describeInstallation() {
+  const config = loadConfig();
+  const remote = await new GitClient(config.paths.installRoot).remoteUrl();
+  const latest = remote ? await fetchLatestRelease(remote) : null;
+  return readInstallationVersion(config.paths.installRoot, latest?.tag ?? null);
+}
+
+export const VERSION_LABELS: Record<string, string> = {
+  up_to_date: 'up to date with the latest release',
+  behind: 'behind the latest release',
+  diverged: 'changed locally',
+  unknown: 'unknown',
+};
+
+export async function versionCommand(): Promise<number> {
+  const config = loadConfig();
+  const version = await describeInstallation();
+  heading('Story Builder - version');
+  table([
+    ['Installation', config.paths.installRoot],
+    ['Project', config.paths.projectRoot],
+    ['Release', version.tag ?? 'none'],
+    ['Commit', version.commit.slice(0, 10)],
+    ['Local commits', String(version.localCommits)],
+    ['Uncommitted changes', version.dirty ? 'yes' : 'no'],
+    ['Latest release', version.latestRelease ?? 'unknown'],
+    ['State', VERSION_LABELS[version.state] ?? version.state],
+  ]);
+  if (version.state === 'behind') {
+    info(`\nA newer release is available: ${version.latestRelease}.`);
   }
+  if (version.state === 'diverged') {
+    info('\nThis installation carries local changes, so it no longer matches any release.');
+  }
+  return 0;
 }

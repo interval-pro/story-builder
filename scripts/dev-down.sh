@@ -2,6 +2,7 @@
 # Stops the services. Postgres keeps running so no state is lost.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+[ -f .env.local ] && { set -a; . ./.env.local; set +a; }
 
 for name in web worker orchestrator api; do
   if [ -f ".run/$name.pid" ]; then
@@ -26,4 +27,4 @@ for port in 3000 4000 4100; do
   fi
 done
 
-echo "Postgres is still running. Stop it with: docker stop ai-engine-postgres"
+echo "Postgres is still running. Stop it with: docker stop \"${PG_CONTAINER:-ai-engine-postgres}\""

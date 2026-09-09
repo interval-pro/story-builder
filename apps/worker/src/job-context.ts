@@ -32,6 +32,8 @@ export interface JobContext {
   secrets: SecretsService;
   logger: Logger;
   workerId: string;
+  /** Where the engine itself lives: its prompts, policies and state. */
+  installRoot: string;
   job: Job;
   task: Task;
   project: Project;
@@ -62,6 +64,7 @@ export async function buildJobContext(input: {
     secrets: new SecretsService(),
     logger: input.logger.child({ taskId: task.id, jobType: input.job.jobType }),
     workerId: input.workerId,
+    installRoot: loadConfig().paths.installRoot,
     job: input.job,
     task,
     project,

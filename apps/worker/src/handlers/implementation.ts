@@ -62,7 +62,7 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
   const projectContext = await buildProjectContext(context);
   const manifest = await context.repos.runtimeManifests.latest(context.project.id);
 
-  const prompt = await loadAgentPrompt('implementation', context.project.repoPath);
+  const prompt = await loadAgentPrompt('implementation', context.installRoot);
   const agentVersionId = await resolveAgentVersion(context, 'implementation', prompt);
   const run = await context.repos.runs.start({
     taskId: context.task.id,
@@ -84,7 +84,7 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
       task: context.task,
       approvedReview: approved.document,
       runtimeManifest: manifest?.manifest ?? null,
-      projectRoot: context.project.repoPath,
+      installRoot: context.installRoot,
       ...(qaFindings.length > 0 ? { qaFindings, qaIteration: context.task.qaIteration } : {}),
       ...(previousSessionId ? { resumeSessionId: previousSessionId } : {}),
     });

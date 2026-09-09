@@ -7,8 +7,9 @@ const logger = createLogger('prompt-loader');
 export type AgentType = 'research' | 'review' | 'implementation' | 'qa' | 'learning';
 
 /**
- * Agent instructions are version controlled inside the repository, so a system
- * story can change how an agent thinks without changing any code.
+ * Agent instructions live in the installation, not in the repository being
+ * worked on, so changing how an agent thinks is a change to the engine that
+ * serves the project rather than a change to the project.
  */
 const FALLBACK_PROMPTS: Record<AgentType, string> = {
   research:
@@ -35,14 +36,14 @@ const FALLBACK_PROMPTS: Record<AgentType, string> = {
 const cache = new Map<string, { content: string; loadedAt: number }>();
 const CACHE_TTL_MS = 30_000;
 
-export function agentPromptPath(type: AgentType, projectRoot?: string): string {
-  const root = projectRoot ?? loadConfig().paths.projectRoot;
+export function agentPromptPath(type: AgentType, installRoot?: string): string {
+  const root = installRoot ?? loadConfig().paths.installRoot;
   return path.join(root, '.ai-engineering', 'agents', `${type}.md`);
 }
 
-/** Reads the agent definition from the repository, falling back to the built-in text. */
-export async function loadAgentPrompt(type: AgentType, projectRoot?: string): Promise<string> {
-  const filePath = agentPromptPath(type, projectRoot);
+/** Reads the agent definition from the installation, falling back to the built-in text. */
+export async function loadAgentPrompt(type: AgentType, installRoot?: string): Promise<string> {
+  const filePath = agentPromptPath(type, installRoot);
   const cached = cache.get(filePath);
   if (cached && Date.now() - cached.loadedAt < CACHE_TTL_MS) return cached.content;
   try {

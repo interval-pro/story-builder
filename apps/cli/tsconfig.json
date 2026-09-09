@@ -8,6 +8,7 @@
     { "path": "../../packages/db" },
     { "path": "../../packages/queue" },
     { "path": "../../packages/git" },
+    { "path": "../../packages/github" },
     { "path": "../../packages/project-knowledge" },
     { "path": "../../packages/runtime-manifest" },
     { "path": "../orchestrator" }

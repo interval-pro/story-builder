@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { AppError } from './errors';
 
 export interface DatabaseConfig {
@@ -16,7 +17,9 @@ export interface AiProviderConfig {
 }
 
 export interface PathsConfig {
-  /** Absolute path of the repository the system is installed into. */
+  /** Absolute path of the installation: the engine, its prompts and its state. */
+  installRoot: string;
+  /** Absolute path of the repository this installation works on. */
   projectRoot: string;
   /** Root directory that holds one Git worktree per task. */
   workspacesRoot: string;
@@ -116,6 +119,7 @@ export function loadConfig(reload = false): SystemConfig {
   const provider = str('AI_PROVIDER', 'mock') as AiProviderConfig['provider'];
   const apiPort = int('API_PORT', 4000);
   const sandboxManagerPort = int('SANDBOX_MANAGER_PORT', 4100);
+  const installRoot = str('INSTALL_ROOT', process.cwd());
   cached = {
     database: {
       url: str('DATABASE_URL', 'postgres://ai_engine:ai_engine@localhost:5432/ai_engine'),
@@ -131,9 +135,12 @@ export function loadConfig(reload = false): SystemConfig {
       requestTimeoutMs: int('AI_REQUEST_TIMEOUT_MS', 300_000),
     },
     paths: {
+      installRoot,
       projectRoot: str('PROJECT_ROOT', process.cwd()),
-      workspacesRoot: str('WORKSPACES_ROOT', '/ai-workspaces'),
-      artifactsRoot: str('ARTIFACTS_ROOT', '/artifacts'),
+      // Worktrees and artifacts belong to the installation, so the repository
+      // being worked on never accumulates state the system owns.
+      workspacesRoot: str('WORKSPACES_ROOT', path.join(installRoot, '.ai-workspaces')),
+      artifactsRoot: str('ARTIFACTS_ROOT', path.join(installRoot, '.artifacts')),
     },
     service: {
       env: (str('NODE_ENV', 'development') as ServiceConfig['env']),

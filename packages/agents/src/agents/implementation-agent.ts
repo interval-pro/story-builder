@@ -13,7 +13,7 @@ export interface ImplementationAgentInput {
   task: Task;
   approvedReview: ReviewDocument;
   runtimeManifest: RuntimeManifestDocument | null;
-  projectRoot: string;
+  installRoot: string;
   /** Set when this run is a fix cycle rather than the first implementation. */
   qaFindings?: QaFinding[];
   qaIteration?: number;
@@ -56,7 +56,7 @@ function renderRuntimeCommands(manifest: RuntimeManifestDocument | null): string
 export async function runImplementationAgent(
   input: ImplementationAgentInput,
 ): Promise<{ outcome: ImplementationOutcome; run: AgentRunOutcome<ImplementationOutcome> }> {
-  const instructions = await loadAgentPrompt('implementation', input.projectRoot);
+  const instructions = await loadAgentPrompt('implementation', input.installRoot);
   const system = [
     instructions,
     '',

@@ -72,7 +72,7 @@ export async function handleResearch(context: JobContext): Promise<void> {
     return;
   }
 
-  const researchPrompt = await loadAgentPrompt('research', context.project.repoPath);
+  const researchPrompt = await loadAgentPrompt('research', context.installRoot);
   const researchVersionId = await resolveAgentVersion(context, 'research', researchPrompt);
   const researchRun = await context.repos.runs.start({
     taskId: context.task.id,
@@ -90,7 +90,7 @@ export async function handleResearch(context: JobContext): Promise<void> {
       story: context.story,
       revision: context.revision,
       task: context.task,
-      projectRoot: context.project.repoPath,
+      installRoot: context.installRoot,
     });
 
     await context.artifacts.put({
@@ -146,7 +146,7 @@ export async function generateReview(
     previousReview: Parameters<typeof runReviewAgent>[0]['previousReview'] | null;
   },
 ): Promise<void> {
-  const reviewPrompt = await loadAgentPrompt('review', context.project.repoPath);
+  const reviewPrompt = await loadAgentPrompt('review', context.installRoot);
   const reviewVersionId = await resolveAgentVersion(context, 'review', reviewPrompt);
   const reviewRun = await context.repos.runs.start({
     taskId: context.task.id,
@@ -165,7 +165,7 @@ export async function generateReview(
       revision: context.revision,
       task: context.task,
       findings: input.findings,
-      projectRoot: context.project.repoPath,
+      installRoot: context.installRoot,
       ...(input.previousReview ? { previousReview: input.previousReview } : {}),
     });
 

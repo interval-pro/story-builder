@@ -10,7 +10,7 @@ export interface ResearchAgentInput {
   story: Story;
   revision: StoryRevision;
   task: Task;
-  projectRoot: string;
+  installRoot: string;
   maxIterations?: number;
   onStep?: (step: AgentStep) => Promise<void> | void;
 }
@@ -36,7 +36,7 @@ Return only the JSON object.`;
 export async function runResearchAgent(
   input: ResearchAgentInput,
 ): Promise<{ findings: ResearchFindings; outcome: AgentRunOutcome<ResearchFindings> }> {
-  const instructions = await loadAgentPrompt('research', input.projectRoot);
+  const instructions = await loadAgentPrompt('research', input.installRoot);
   const system = [
     instructions,
     '',

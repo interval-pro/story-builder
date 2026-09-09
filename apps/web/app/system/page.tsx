@@ -16,6 +16,25 @@ interface Status {
   repository: { defaultBranch: string; head: string | null; remoteUrl: string | null };
 }
 
+interface Version {
+  installRoot: string;
+  projectRoot: string;
+  tag: string | null;
+  commit: string;
+  localCommits: number;
+  dirty: boolean;
+  latestRelease: string | null;
+  releaseUrl: string | null;
+  state: 'up_to_date' | 'behind' | 'diverged' | 'unknown';
+}
+
+const VERSION_LABELS: Record<Version['state'], string> = {
+  up_to_date: 'up to date',
+  behind: 'update available',
+  diverged: 'changed locally',
+  unknown: 'unknown',
+};
+
 interface Health {
   status: string;
   database: boolean;
@@ -31,17 +50,20 @@ interface Health {
 export default function SystemPage() {
   const [status, setStatus] = useState<Status | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
+  const [version, setVersion] = useState<Version | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
-        const [statusResult, healthResult] = await Promise.all([
+        const [statusResult, healthResult, versionResult] = await Promise.all([
           api.get<Status>('/api/system/status'),
           api.get<Health>('/api/health'),
+          api.get<Version>('/api/system/version').catch(() => null),
         ]);
         setStatus(statusResult);
         setHealth(healthResult);
+        setVersion(versionResult);
         setError(null);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : String(loadError));
@@ -72,6 +94,18 @@ export default function SystemPage() {
           <div>{health.agentEngine}</div>
           <div className="meta">{health.agentEngineReady ? health.claudeCliVersion ?? 'ready' : 'not available'}</div>
           <div className="meta">{health.model}</div>
+        </div>
+        <div className="card">
+          <div className="meta">Installation</div>
+          <div>{version ? `${version.tag ?? version.commit.slice(0, 10)} · ${VERSION_LABELS[version.state]}` : 'unknown'}</div>
+          <div className="meta">
+            {version?.state === 'behind' ? `latest release ${version.latestRelease}` : null}
+            {version?.state === 'diverged'
+              ? `${version.localCommits} local commit(s)${version.dirty ? ' and uncommitted changes' : ''}`
+              : null}
+            {version?.state === 'up_to_date' ? `matches ${version.latestRelease}` : null}
+          </div>
+          <div className="meta">{version?.installRoot ?? ''}</div>
         </div>
         <div className="card">
           <div className="meta">Repository</div>

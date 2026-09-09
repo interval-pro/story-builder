@@ -12,7 +12,7 @@ export interface LearningAgentInput {
   reviewBefore: ReviewDocument | null;
   reviewAfter: ReviewDocument | null;
   qaSummaries: string[];
-  projectRoot: string;
+  installRoot: string;
 }
 
 const RESULT_INSTRUCTION = `Produce a single JSON object with exactly this shape:
@@ -43,7 +43,7 @@ export async function runLearningAgent(input: LearningAgentInput): Promise<Learn
     return { principles: [], invariants: [] };
   }
 
-  const instructions = await loadAgentPrompt('learning', input.projectRoot);
+  const instructions = await loadAgentPrompt('learning', input.installRoot);
   const system = [instructions, '', renderProjectContext(input.projectContext)].join('\n');
 
   const notes = input.notes

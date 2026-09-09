@@ -115,6 +115,21 @@ export class GitClient {
       });
   }
 
+  /** The tag HEAD sits on, or the most recent one behind it. */
+  async describeTag(): Promise<{ tag: string; exact: boolean } | null> {
+    const exact = await this.run(['describe', '--tags', '--exact-match'], { allowFailure: true });
+    if (exact.exitCode === 0 && exact.stdout.trim()) return { tag: exact.stdout.trim(), exact: true };
+    const nearest = await this.run(['describe', '--tags', '--abbrev=0'], { allowFailure: true });
+    if (nearest.exitCode === 0 && nearest.stdout.trim()) return { tag: nearest.stdout.trim(), exact: false };
+    return null;
+  }
+
+  async listTags(): Promise<string[]> {
+    const result = await this.run(['tag', '--list', '--sort=-v:refname'], { allowFailure: true });
+    if (result.exitCode !== 0) return [];
+    return result.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+  }
+
   async remoteUrl(remote = 'origin'): Promise<string | null> {
     const result = await this.run(['remote', 'get-url', remote], { allowFailure: true });
     return result.exitCode === 0 ? result.stdout.trim() : null;

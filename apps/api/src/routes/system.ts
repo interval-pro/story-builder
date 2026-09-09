@@ -1,5 +1,6 @@
 import { HttpRouter, loadConfig, RESPONSE_HANDLED } from '@ai-engine/shared';
-import { GitClient } from '@ai-engine/git';
+import { GitClient, readInstallationVersion } from '@ai-engine/git';
+import { fetchLatestRelease } from '@ai-engine/github';
 import { claudeCliAvailable } from '@ai-engine/claude-code';
 import { checkBaseDrift } from '@ai-engine/conflict-engine';
 import { primaryProjectId, type ApiContext } from '../context';
@@ -29,6 +30,19 @@ export function registerSystemRoutes(router: HttpRouter, context: ApiContext): v
       aiProvider: engine === 'claude-code' ? 'claude-code CLI login' : config.ai.provider,
       model: engine === 'claude-code' ? config.agents.claudeModel ?? 'CLI default' : config.ai.model,
       sandboxEnabled: config.sandbox.enabled,
+    };
+  });
+
+  router.get('/api/system/version', async () => {
+    const config = loadConfig();
+    const remote = await new GitClient(config.paths.installRoot).remoteUrl().catch(() => null);
+    const latest = remote ? await fetchLatestRelease(remote) : null;
+    const version = await readInstallationVersion(config.paths.installRoot, latest?.tag ?? null);
+    return {
+      installRoot: config.paths.installRoot,
+      projectRoot: config.paths.projectRoot,
+      releaseUrl: latest?.url ?? null,
+      ...version,
     };
   });
 

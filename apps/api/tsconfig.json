@@ -9,6 +9,7 @@
     { "path": "../../packages/events" },
     { "path": "../../packages/queue" },
     { "path": "../../packages/git" },
+    { "path": "../../packages/github" },
     { "path": "../../packages/artifacts" },
     { "path": "../../packages/claude-code" },
     { "path": "../../packages/project-brain" },

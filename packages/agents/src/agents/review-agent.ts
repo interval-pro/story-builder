@@ -14,7 +14,7 @@ export interface ReviewAgentInput {
   revision: StoryRevision;
   task: Task;
   findings: ResearchFindings;
-  projectRoot: string;
+  installRoot: string;
   /** Present when regenerating after human notes. */
   previousReview?: { document: ReviewDocument; notes: ReviewNote[] };
   maxIterations?: number;
@@ -45,7 +45,7 @@ Return only the JSON object.`;
 export async function runReviewAgent(
   input: ReviewAgentInput,
 ): Promise<{ document: ReviewDocument; outcome: AgentRunOutcome<ReviewDocument>; problems: string[] }> {
-  const instructions = await loadAgentPrompt('review', input.projectRoot);
+  const instructions = await loadAgentPrompt('review', input.installRoot);
   const system = [
     instructions,
     '',
