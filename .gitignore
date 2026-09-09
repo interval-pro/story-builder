@@ -8,3 +8,4 @@ coverage/
 .ai-workspaces/
 .artifacts/
 .DS_Store
+.run/
