@@ -26,8 +26,8 @@ export function registerSystemRoutes(router: HttpRouter, context: ApiContext): v
       agentEngine: engine,
       agentEngineReady: cli.available,
       claudeCliVersion: cli.version,
-      aiProvider: config.ai.provider,
-      model: config.agents.claudeModel ?? config.ai.model,
+      aiProvider: engine === 'claude-code' ? 'claude-code CLI login' : config.ai.provider,
+      model: engine === 'claude-code' ? config.agents.claudeModel ?? 'CLI default' : config.ai.model,
       sandboxEnabled: config.sandbox.enabled,
     };
   });
