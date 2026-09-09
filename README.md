@@ -118,6 +118,23 @@ stored in the Project Brain. Not "always use NotificationService", but "prefer
 extending an existing domain responsibility instead of introducing another
 component when the behaviour belongs to the same boundary".
 
+## Pushing from a headless worker
+
+The push is the one step that leaves the machine, and it is the step most likely
+to fail in an automated setup. A desktop Git install authenticates through the
+operating system keychain and falls back to prompting on a terminal. A worker
+has neither: no keychain session and no terminal.
+
+So the worker never relies on ambient credentials. It injects `GITHUB_TOKEN` for
+that single `git push` through a helper that lives only for the duration of the
+command. The ambient helper is cleared first, so a broken or locked keychain
+cannot be consulted, and the token never reaches `.git/config`, the remote URL
+or the reflog. Prompting is disabled everywhere, so a missing credential fails
+with a readable error instead of hanging.
+
+If the push fails the task is blocked with the Git error attached, and the
+message says explicitly when no token was configured.
+
 ## Working on the system itself
 
 The system is installed into the repository as `.ai-engineering/`, and it is a
@@ -154,4 +171,4 @@ ones that change behaviour most:
 | `AI_PROVIDER` | Only for the builtin engine: `anthropic`, `openai` or `mock` |
 | `SANDBOX_DOCKER_ENABLED` | `false` runs tasks in host worktrees instead of containers |
 | `MAX_QA_ITERATIONS` | How many fix cycles before a task is blocked |
-| `GITHUB_TOKEN` | Without it the system stops at a local branch |
+| `GITHUB_TOKEN` | Needed to push. Without it the system stops at a local branch |

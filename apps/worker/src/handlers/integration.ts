@@ -136,9 +136,15 @@ export async function handlePushAndPullRequest(context: JobContext): Promise<voi
     return;
   }
 
-  const push = await git.push('origin', context.task.branchName);
+  // The token is injected per invocation. Without one the push depends on an
+  // ambient credential helper, which a headless worker usually does not have.
+  const token = loadConfig().github.token;
+  const push = await git.push('origin', context.task.branchName, { token });
   if (push.exitCode !== 0) {
-    await context.orchestrator.block(context.task.id, `Push failed: ${push.stderr}`, {
+    const hint = token
+      ? ''
+      : ' No GITHUB_TOKEN is configured, so the push relied on the local Git credential helper.';
+    await context.orchestrator.block(context.task.id, `Push failed: ${push.stderr}${hint}`, {
       type: 'worker',
       id: context.workerId,
     });

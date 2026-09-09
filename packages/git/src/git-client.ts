@@ -28,14 +28,23 @@ export class GitError extends AppError {
 
 /** Thin, explicit wrapper around the Git CLI. No shell interpolation anywhere. */
 export class GitClient {
-  constructor(public readonly cwd: string) {}
+  public readonly cwd: string;
 
-  async run(args: string[], options: { allowFailure?: boolean; maxBuffer?: number } = {}): Promise<GitResult> {
+  constructor(cwd: string) {
+    this.cwd = cwd;
+  }
+
+  async run(
+    args: string[],
+    options: { allowFailure?: boolean; maxBuffer?: number; env?: Record<string, string> } = {},
+  ): Promise<GitResult> {
     try {
       const { stdout, stderr } = await execFileAsync('git', args, {
         cwd: this.cwd,
         maxBuffer: options.maxBuffer ?? 64 * 1024 * 1024,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        // Prompting is disabled everywhere: a headless worker must fail with a
+        // readable error instead of blocking on a terminal that is not there.
+        env: { ...process.env, ...options.env, GIT_TERMINAL_PROMPT: '0' },
       });
       return { stdout, stderr, exitCode: 0 };
     } catch (error) {
@@ -185,10 +194,33 @@ export class GitClient {
     return result.exitCode === 0 ? result.stdout.trim() : null;
   }
 
-  async push(remote: string, branch: string, force = false): Promise<GitResult> {
-    const args = ['push', '--set-upstream', remote, branch];
-    if (force) args.push('--force-with-lease');
-    return this.run(args);
+  /**
+   * Pushes a branch. When a token is supplied the credential is injected for
+   * this one invocation through an ephemeral helper: the ambient helper is
+   * cleared first so a broken or absent keychain cannot be consulted, and the
+   * secret never reaches .git/config, the remote URL or the reflog.
+   */
+  async push(
+    remote: string,
+    branch: string,
+    options: { force?: boolean; token?: string | undefined } = {},
+  ): Promise<GitResult> {
+    const args: string[] = [];
+    if (options.token) {
+      args.push(
+        '-c',
+        'credential.helper=',
+        '-c',
+        `credential.helper=!f() { echo username=x-access-token; echo password="$AI_ENGINE_GIT_TOKEN"; }; f`,
+      );
+    }
+    args.push('push', '--set-upstream', remote, branch);
+    if (options.force) args.push('--force-with-lease');
+
+    return this.run(args, {
+      allowFailure: true,
+      ...(options.token ? { env: { AI_ENGINE_GIT_TOKEN: options.token } } : {}),
+    });
   }
 
   async showFile(ref: string, filePath: string): Promise<string | null> {
