@@ -41,9 +41,11 @@ start api node apps/api/dist/main.js
 start orchestrator node apps/orchestrator/dist/main.js
 start worker node apps/worker/dist/main.js
 
-if [ ! -d apps/web/.next ]; then
+# A failed build leaves the .next directory behind without a BUILD_ID, so the
+# marker is what tells us whether there is something worth starting.
+if [ ! -f apps/web/.next/BUILD_ID ]; then
   echo "-> Building the cockpit"
-  ( cd apps/web && NEXT_PUBLIC_API_BASE_URL="${API_BASE_URL:-http://localhost:4000}" npx next build >/dev/null )
+  ( cd apps/web && ulimit -n 8192 && NEXT_PUBLIC_API_BASE_URL="${API_BASE_URL:-http://localhost:4000}" npx next build >/dev/null )
 fi
 # exec replaces the wrapper shell, so the recorded pid is the server itself and
 # stopping it actually stops the server rather than an empty parent.

@@ -118,6 +118,17 @@ export default function TaskPage() {
         </div>
       ) : null}
 
+      {task.state === 'FAILED' ? (
+        <div className="card" style={{ borderColor: 'var(--red)' }}>
+          <strong>This task failed</strong>
+          <p>{task.failureReason ?? 'No reason was recorded.'}</p>
+          <p className="meta">Retrying continues from what already completed rather than starting over.</p>
+          <button disabled={busy} onClick={() => void act('retry')}>
+            Retry
+          </button>
+        </div>
+      ) : null}
+
       {task.state === 'HIGH_RISK_CONFIRMATION_REQUIRED' ? (
         <div className="card" style={{ borderColor: 'var(--amber)' }}>
           <strong>This change is high risk</strong>

@@ -80,6 +80,10 @@ export function registerTaskRoutes(router: HttpRouter, context: ApiContext): voi
     return { task: await context.commands.stop(params['id']!, actorFrom(headers as Record<string, unknown>)) };
   });
 
+  router.post('/api/tasks/:id/retry', async ({ params, headers }) => {
+    return { task: await context.commands.retry(params['id']!, actorFrom(headers as Record<string, unknown>)) };
+  });
+
   router.post('/api/tasks/:id/unblock', async ({ params, body, headers }) => {
     const input = requireBody<{ target: 'ANALYSIS_QUEUED' | 'IMPLEMENTATION_QUEUED' | 'FIX_REQUIRED' }>(body, ['target']);
     if (!['ANALYSIS_QUEUED', 'IMPLEMENTATION_QUEUED', 'FIX_REQUIRED'].includes(input.target)) {

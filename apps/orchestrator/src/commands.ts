@@ -318,6 +318,38 @@ export class TaskCommands {
     return task;
   }
 
+  /**
+   * Restarts a failed task at the phase it should continue from. The handlers
+   * reuse whatever they already produced, so a retry after an interruption
+   * does not repeat work that was already paid for.
+   */
+  async retry(taskId: string, actor: Actor): Promise<Task> {
+    const repos = createRepositories(this.db);
+    const task = await repos.tasks.getById(taskId);
+    if (task.state !== 'FAILED') {
+      throw new AppError('not_failed', `Only a failed task can be retried, this one is ${task.state}`, 409);
+    }
+
+    const approvedReviewVersionId = await repos.approvals.findApprovedReviewVersionId(taskId);
+    const qaRuns = await repos.qaRuns.listByTask(taskId);
+
+    const target = !approvedReviewVersionId
+      ? { state: 'ANALYSIS_QUEUED' as const, jobType: 'RESEARCH' as const }
+      : qaRuns.length === 0
+        ? { state: 'IMPLEMENTATION_QUEUED' as const, jobType: 'IMPLEMENTATION' as const }
+        : { state: 'QA_QUEUED' as const, jobType: 'QA' as const };
+
+    logger.info('retrying a failed task', { taskId, from: task.failureReason, to: target.state });
+    return this.orchestrator.transition({
+      taskId,
+      to: target.state,
+      actor,
+      reason: 'retried by human',
+      patch: { failureReason: null },
+      enqueue: { jobType: target.jobType, payload: { reason: 'retry' } },
+    });
+  }
+
   /** Unblocks a task by sending it back to the phase the human chooses. */
   async unblock(input: { taskId: string; target: 'ANALYSIS_QUEUED' | 'IMPLEMENTATION_QUEUED' | 'FIX_REQUIRED'; actor: Actor }): Promise<Task> {
     const jobType = input.target === 'ANALYSIS_QUEUED' ? 'RESEARCH' : input.target === 'IMPLEMENTATION_QUEUED' ? 'IMPLEMENTATION' : 'FIX';
