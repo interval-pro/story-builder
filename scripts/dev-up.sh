@@ -45,7 +45,9 @@ if [ ! -d apps/web/.next ]; then
   echo "-> Building the cockpit"
   ( cd apps/web && NEXT_PUBLIC_API_BASE_URL="${API_BASE_URL:-http://localhost:4000}" npx next build >/dev/null )
 fi
-start web sh -c "cd apps/web && NEXT_PUBLIC_API_BASE_URL='${API_BASE_URL:-http://localhost:4000}' npx next start -p 3000"
+# exec replaces the wrapper shell, so the recorded pid is the server itself and
+# stopping it actually stops the server rather than an empty parent.
+start web sh -c "cd apps/web && NEXT_PUBLIC_API_BASE_URL='${API_BASE_URL:-http://localhost:4000}' exec npx next start -p 3000"
 
 until curl -sf "${API_BASE_URL:-http://localhost:4000}/api/health" >/dev/null 2>&1; do sleep 1; done
 
