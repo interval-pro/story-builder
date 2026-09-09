@@ -1,0 +1,22 @@
+# Defaults for this installation. Environment variables override these.
+ai:
+  provider: mock
+  temperature: 0.2
+  maxOutputTokens: 8000
+
+execution:
+  maxQaIterations: 5
+  workerConcurrency: 2
+  jobMaxAttempts: 3
+  jobLeaseSeconds: 900
+
+sandbox:
+  enabled: true
+  image: ai-engine/sandbox:latest
+  cpuLimit: "2"
+  memoryLimit: 4g
+  networkMode: bridge
+
+risk:
+  requireSecondApprovalFor:
+    - HIGH

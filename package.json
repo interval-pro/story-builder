@@ -1,0 +1,34 @@
+{
+  "name": "ai-engineering-system",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI Engineering System — an engineering process in which AI participates as multiple engineers.",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "build:clean": "tsc -b tsconfig.build.json --clean",
+    "typecheck": "tsc -b tsconfig.build.json --pretty",
+    "test": "node --import ./scripts/register-source.mjs --test \"packages/*/test/*.test.ts\"",
+    "lint": "eslint . --ext .ts,.tsx",
+    "migrate": "node -r ./scripts/register.js packages/db/src/cli/migrate.ts",
+    "db:reset": "npm run migrate -- --reset",
+    "dev:api": "tsx watch apps/api/src/main.ts",
+    "dev:orchestrator": "tsx watch apps/orchestrator/src/main.ts",
+    "dev:worker": "tsx watch apps/worker/src/main.ts",
+    "dev:sandbox-manager": "tsx watch apps/sandbox-manager/src/main.ts",
+    "dev:web": "npm --workspace @ai-engine/web run dev",
+    "ai-engine": "tsx apps/cli/src/main.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

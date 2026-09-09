@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.next/
+.env
+.env.local
+coverage/
+.ai-workspaces/
+.artifacts/
+.DS_Store

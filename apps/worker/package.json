@@ -1,0 +1,27 @@
+{
+  "name": "@ai-engine/worker",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": { "build": "tsc -b", "start": "node dist/main.js" },
+  "dependencies": {
+    "@ai-engine/agents": "*",
+    "@ai-engine/ai-provider": "*",
+    "@ai-engine/artifacts": "*",
+    "@ai-engine/conflict-engine": "*",
+    "@ai-engine/db": "*",
+    "@ai-engine/domain": "*",
+    "@ai-engine/events": "*",
+    "@ai-engine/git": "*",
+    "@ai-engine/github": "*",
+    "@ai-engine/orchestrator": "*",
+    "@ai-engine/project-brain": "*",
+    "@ai-engine/project-knowledge": "*",
+    "@ai-engine/queue": "*",
+    "@ai-engine/runtime-manifest": "*",
+    "@ai-engine/security": "*",
+    "@ai-engine/shared": "*",
+    "@ai-engine/tools": "*"
+  }
+}

@@ -1,0 +1,149 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ai-engine-postgres
+    environment:
+      POSTGRES_USER: ai_engine
+      POSTGRES_PASSWORD: ai_engine
+      POSTGRES_DB: ai_engine
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_engine -d ai_engine"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/node.Dockerfile
+    container_name: ai-engine-migrate
+    command: ["node", "packages/db/dist/cli/migrate.js"]
+    environment:
+      DATABASE_URL: postgres://ai_engine:ai_engine@postgres:5432/ai_engine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/node.Dockerfile
+    container_name: ai-engine-api
+    command: ["node", "apps/api/dist/main.js"]
+    environment:
+      DATABASE_URL: postgres://ai_engine:ai_engine@postgres:5432/ai_engine
+      PROJECT_ROOT: /project
+      WORKSPACES_ROOT: /ai-workspaces
+      ARTIFACTS_ROOT: /artifacts
+      SANDBOX_MANAGER_URL: http://sandbox-manager:4100
+      API_PORT: "4000"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - ${PROJECT_ROOT:-.}:/project
+      - workspaces:/ai-workspaces
+      - artifacts:/artifacts
+    ports:
+      - "4000:4000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: docker/node.Dockerfile
+    container_name: ai-engine-orchestrator
+    command: ["node", "apps/orchestrator/dist/main.js"]
+    environment:
+      DATABASE_URL: postgres://ai_engine:ai_engine@postgres:5432/ai_engine
+      PROJECT_ROOT: /project
+      WORKSPACES_ROOT: /ai-workspaces
+      ARTIFACTS_ROOT: /artifacts
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - ${PROJECT_ROOT:-.}:/project
+      - workspaces:/ai-workspaces
+      - artifacts:/artifacts
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/node.Dockerfile
+    command: ["node", "apps/worker/dist/main.js"]
+    environment:
+      DATABASE_URL: postgres://ai_engine:ai_engine@postgres:5432/ai_engine
+      PROJECT_ROOT: /project
+      WORKSPACES_ROOT: /ai-workspaces
+      ARTIFACTS_ROOT: /artifacts
+      SANDBOX_MANAGER_URL: http://sandbox-manager:4100
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      AI_MODEL: ${AI_MODEL:-mock-model}
+      AI_API_KEY: ${AI_API_KEY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - ${PROJECT_ROOT:-.}:/project
+      - workspaces:/ai-workspaces
+      - artifacts:/artifacts
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      sandbox-manager:
+        condition: service_started
+    deploy:
+      replicas: 1
+
+  # The only service with Docker privileges. Workers reach it over HTTP.
+  sandbox-manager:
+    build:
+      context: .
+      dockerfile: docker/node.Dockerfile
+    container_name: ai-engine-sandbox-manager
+    command: ["node", "apps/sandbox-manager/dist/main.js"]
+    environment:
+      DATABASE_URL: postgres://ai_engine:ai_engine@postgres:5432/ai_engine
+      PROJECT_ROOT: /project
+      WORKSPACES_ROOT: /ai-workspaces
+      ARTIFACTS_ROOT: /artifacts
+      SANDBOX_MANAGER_PORT: "4100"
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-ai-engine/sandbox:latest}
+      SANDBOX_DOCKER_ENABLED: ${SANDBOX_DOCKER_ENABLED:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - ${PROJECT_ROOT:-.}:/project
+      - workspaces:/ai-workspaces
+      - artifacts:/artifacts
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "4100:4100"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000}
+    container_name: ai-engine-web
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:
+  workspaces:
+  artifacts:

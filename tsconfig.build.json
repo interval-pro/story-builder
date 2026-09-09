@@ -1,0 +1,26 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "packages/domain" },
+    { "path": "packages/db" },
+    { "path": "packages/events" },
+    { "path": "packages/queue" },
+    { "path": "packages/artifacts" },
+    { "path": "packages/security" },
+    { "path": "packages/git" },
+    { "path": "packages/github" },
+    { "path": "packages/ai-provider" },
+    { "path": "packages/tools" },
+    { "path": "packages/agents" },
+    { "path": "packages/project-brain" },
+    { "path": "packages/project-knowledge" },
+    { "path": "packages/conflict-engine" },
+    { "path": "packages/runtime-manifest" },
+    { "path": "apps/orchestrator" },
+    { "path": "apps/worker" },
+    { "path": "apps/api" },
+    { "path": "apps/sandbox-manager" },
+    { "path": "apps/cli" }
+  ]
+}

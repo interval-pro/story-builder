@@ -1,0 +1,101 @@
+import { HttpRouter, loadConfig, RESPONSE_HANDLED } from '@ai-engine/shared';
+import { GitClient } from '@ai-engine/git';
+import { checkBaseDrift } from '@ai-engine/conflict-engine';
+import { primaryProjectId, type ApiContext } from '../context';
+
+/** System status, artifacts, conflicts and metrics. */
+export function registerSystemRoutes(router: HttpRouter, context: ApiContext): void {
+  router.get('/api/health', async () => {
+    const config = loadConfig();
+    let sandboxManager = false;
+    try {
+      const response = await fetch(`${config.service.sandboxManagerUrl}/health`);
+      sandboxManager = response.ok;
+    } catch {
+      sandboxManager = false;
+    }
+    return {
+      status: 'ok',
+      database: await context.db.healthy(),
+      sandboxManager,
+      aiProvider: config.ai.provider,
+      model: config.ai.model,
+      sandboxEnabled: config.sandbox.enabled,
+    };
+  });
+
+  router.get('/api/system/status', async ({ query }) => {
+    const projectId = await primaryProjectId(context, query.get('projectId'));
+    const project = await context.repos.projects.getById(projectId);
+    const active = await context.repos.tasks.listActive(projectId);
+    const jobs = await context.queue.stats();
+    const conflicts = await context.conflicts.allOpenConflicts();
+    const manifest = await context.repos.runtimeManifests.latest(projectId);
+    const snapshot = await context.knowledge.latest(projectId);
+
+    const git = new GitClient(project.repoPath);
+    const head = await git.resolveRef(project.defaultBranch).catch(() => null);
+
+    return {
+      project,
+      activeTasks: active.length,
+      tasks: active,
+      jobs,
+      conflicts,
+      runtimeManifest: manifest,
+      knowledgeSnapshot: snapshot,
+      repository: { defaultBranch: project.defaultBranch, head, remoteUrl: project.remoteUrl },
+    };
+  });
+
+  router.get('/api/system/events', async ({ query }) => {
+    const projectId = await primaryProjectId(context, query.get('projectId'));
+    const limit = Number.parseInt(query.get('limit') ?? '100', 10);
+    return { events: await context.events.listByProject(projectId, limit) };
+  });
+
+  router.get('/api/system/metrics', async ({ query }) => {
+    const projectId = await primaryProjectId(context, query.get('projectId'));
+    return { metrics: await context.repos.metrics.summary(projectId) };
+  });
+
+  router.get('/api/conflicts', async () => ({ conflicts: await context.conflicts.allOpenConflicts() }));
+
+  router.get('/api/tasks/:id/base-drift', async ({ params }) => {
+    const task = await context.repos.tasks.getById(params['id']!);
+    const project = await context.repos.projects.getById(task.projectId);
+    const drift = await checkBaseDrift({
+      repositoryPath: project.repoPath,
+      baseBranch: task.baseBranch,
+      baseCommit: task.baseCommit,
+    });
+    if (drift.moved && !task.baseMoved) {
+      await context.repos.tasks.update(task.id, { baseMoved: true });
+    }
+    return drift;
+  });
+
+  router.get('/api/artifacts/:id', async ({ params, query, response }) => {
+    const { record, content } = await context.artifacts.get(params['id']!);
+    if (query.get('download') === 'true') {
+      response.writeHead(200, {
+        'content-type': record.contentType,
+        'content-disposition': `attachment; filename="${record.kind}-${record.id.slice(0, 8)}"`,
+      });
+      response.end(content);
+      return RESPONSE_HANDLED;
+    }
+    return { artifact: record, content: content.toString('utf8') };
+  });
+
+  router.get('/api/jobs', async () => ({ stats: await context.queue.stats() }));
+
+  router.post('/api/system/knowledge-refresh', async ({ query }) => {
+    const projectId = await primaryProjectId(context, query.get('projectId'));
+    const tasks = await context.repos.tasks.listByProject(projectId, 1);
+    const anchor = tasks[0];
+    if (!anchor) return { queued: false, reason: 'No task exists yet to anchor the refresh job' };
+    const job = await context.queue.enqueue({ taskId: anchor.id, jobType: 'KNOWLEDGE_REFRESH', payload: { taskId: anchor.id } });
+    return { queued: Boolean(job), job };
+  });
+}

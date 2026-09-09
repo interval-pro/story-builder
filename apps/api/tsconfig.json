@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "include": ["src/**/*.ts"],
+  "references": [
+    { "path": "../../packages/shared" },
+    { "path": "../../packages/domain" },
+    { "path": "../../packages/db" },
+    { "path": "../../packages/events" },
+    { "path": "../../packages/queue" },
+    { "path": "../../packages/git" },
+    { "path": "../../packages/artifacts" },
+    { "path": "../../packages/project-brain" },
+    { "path": "../../packages/project-knowledge" },
+    { "path": "../../packages/conflict-engine" },
+    { "path": "../orchestrator" }
+  ]
+}
