@@ -4,12 +4,44 @@
   --panel-2: #1c2128;
   --border: #30363d;
   --text: #e6edf3;
-  --muted: #8b949e;
+  --muted: #a7b1bd;
   --accent: #58a6ff;
   --green: #3fb950;
   --amber: #d29922;
   --red: #f85149;
   --radius: 8px;
+
+  /* Tone colours at low alpha, used to fill badges so they read from a distance. */
+  --accent-soft: rgba(88, 166, 255, 0.15);
+  --green-soft: rgba(63, 185, 80, 0.15);
+  --amber-soft: rgba(210, 153, 34, 0.15);
+  --red-soft: rgba(248, 81, 73, 0.15);
+
+  /* Type scale. Every font-size in this file is one of these six steps. */
+  --fs-label: 12px;
+  --fs-detail: 13px;
+  --fs-body: 14px;
+  --fs-heading: 15px;
+  --fs-value: 18px;
+  --fs-title: 20px;
+
+  /* Spacing scale on a 4px base. Every padding, margin and gap is one of these. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Fixed structural sizes. */
+  --radius-sm: 6px;
+  --sidebar-width: 220px;
+  --content-max: 1200px;
+  --card-min: 240px;
+  --col-xs: 90px;
+  --col-sm: 130px;
+  --col-md: 180px;
+  --col-lg: 260px;
 }
 
 * { box-sizing: border-box; }
@@ -20,7 +52,7 @@ html, body {
   background: var(--bg);
   color: var(--text);
   font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  font-size: 14px;
+  font-size: var(--fs-body);
   line-height: 1.6;
 }
 
@@ -30,52 +62,91 @@ a:hover { text-decoration: underline; }
 .layout { display: flex; min-height: 100vh; }
 
 .sidebar {
-  width: 220px;
+  width: var(--sidebar-width);
   flex-shrink: 0;
   border-right: 1px solid var(--border);
-  padding: 20px 16px;
+  padding: var(--space-5) var(--space-4);
   background: var(--panel);
 }
 
-.sidebar h1 { font-size: 15px; margin: 0 0 4px; }
-.sidebar .tagline { color: var(--muted); font-size: 12px; margin-bottom: 24px; }
-.sidebar nav a { display: block; padding: 7px 10px; border-radius: 6px; color: var(--text); }
+.sidebar h1 { font-size: var(--fs-heading); margin: 0 0 var(--space-1); }
+.sidebar .tagline { color: var(--muted); font-size: var(--fs-label); margin-bottom: var(--space-5); }
+.sidebar nav a { display: block; padding: var(--space-2); border-radius: var(--radius-sm); color: var(--text); }
 .sidebar nav a:hover { background: var(--panel-2); text-decoration: none; }
 .sidebar nav a.active { background: var(--panel-2); color: var(--accent); }
 
-.content { flex: 1; padding: 28px 32px; max-width: 1200px; }
+/* min-width:0 lets the main column shrink below its content width, so a wide
+   table scrolls inside its own container instead of widening the whole page. */
+.content { flex: 1; min-width: 0; padding: var(--space-6); max-width: var(--content-max); }
 
-h2 { font-size: 20px; margin: 0 0 4px; }
-h3 { font-size: 15px; margin: 24px 0 8px; }
-.subtitle { color: var(--muted); margin-bottom: 24px; }
+h2 { font-size: var(--fs-title); margin: 0 0 var(--space-1); }
+h3 { font-size: var(--fs-heading); margin: var(--space-5) 0 var(--space-2); }
+.subtitle { color: var(--muted); margin-bottom: var(--space-5); }
 
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 16px;
-  margin-bottom: 16px;
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+  /* Install paths, remote URLs and commit hashes have no spaces to break at,
+     so without this they set the card's minimum width and a narrow window
+     scrolls sideways. */
+  overflow-wrap: anywhere;
 }
 
-.card-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.card h3 { margin-top: 0; }
+.card > *:last-child { margin-bottom: 0; }
+.card ol > li { margin-bottom: var(--space-2); }
 
-textarea, input[type="text"] {
-  width: 100%;
+.card.warning { border-color: var(--amber); }
+.card.critical { border-color: var(--red); }
+
+.card-row { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-4); flex-wrap: wrap; }
+.card-row h3 { margin: 0; }
+/* A header row owns no bottom margin of its own, so whatever follows it sets
+   the gap. One rule keeps that gap the same on every page. */
+.card-row + * { margin-top: var(--space-3); }
+
+/* One hierarchy for every card: a quiet label, one prominent value, then
+   detail lines that recede. */
+.card-label {
+  color: var(--muted);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: var(--space-1);
+}
+.card-value {
+  color: var(--text);
+  font-size: var(--fs-value);
+  font-weight: 600;
+  line-height: 1.3;
+  margin-bottom: var(--space-2);
+}
+.card-detail { color: var(--muted); font-size: var(--fs-detail); }
+.meta { color: var(--muted); font-size: var(--fs-detail); }
+
+textarea, input[type="text"], select {
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--text);
-  padding: 10px 12px;
+  padding: var(--space-2) var(--space-3);
   font: inherit;
-  resize: vertical;
 }
+textarea, input[type="text"] { width: 100%; }
+textarea { resize: vertical; }
+/* Extra right padding leaves room for the native caret. */
+select { max-width: 100%; padding-right: var(--space-6); cursor: pointer; }
 
 button {
   background: var(--accent);
-  color: #0d1117;
+  color: var(--bg);
   border: none;
-  border-radius: 6px;
-  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
@@ -84,29 +155,40 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
 button.danger { background: var(--red); color: #fff; }
 
+/* Buttons a card offers, set apart from the text above them so they read as
+   actions rather than as another line. */
+.actions { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); flex-wrap: wrap; }
+
+/* A row of controls that sits above the content it acts on. */
+.toolbar { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); flex-wrap: wrap; }
+
+.row .card-label, .actions .card-label, .toolbar .card-label { margin-bottom: 0; }
+
 .badge {
   display: inline-block;
-  padding: 2px 8px;
+  padding: var(--space-1) var(--space-2);
   border-radius: 999px;
-  font-size: 12px;
+  font-size: var(--fs-label);
   font-weight: 600;
+  line-height: 1.3;
   border: 1px solid var(--border);
 }
-.badge.waiting { color: var(--muted); }
-.badge.running { color: var(--accent); border-color: var(--accent); }
-.badge.done { color: var(--green); border-color: var(--green); }
-.badge.attention { color: var(--amber); border-color: var(--amber); }
+.badge.waiting { color: var(--muted); background: var(--panel-2); }
+.badge.running { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.badge.done { color: var(--green); border-color: var(--green); background: var(--green-soft); }
+.badge.attention { color: var(--amber); border-color: var(--amber); background: var(--amber-soft); }
+.badge-lg { font-size: var(--fs-heading); padding: var(--space-1) var(--space-3); }
 
-.meta { color: var(--muted); font-size: 12px; }
+.age { color: var(--muted); font-size: var(--fs-label); white-space: nowrap; }
 
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+.tabs { display: flex; gap: var(--space-1); border-bottom: 1px solid var(--border); margin-bottom: var(--space-5); flex-wrap: wrap; }
 .tabs button {
   background: none;
   color: var(--muted);
   border: none;
   border-bottom: 2px solid transparent;
   border-radius: 0;
-  padding: 8px 14px;
+  padding: var(--space-2) var(--space-4);
   font-weight: 500;
 }
 .tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
@@ -114,35 +196,57 @@ button.danger { background: var(--red); color: #fff; }
 pre {
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 12px;
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
   overflow-x: auto;
-  font-size: 12.5px;
+  font-size: var(--fs-detail);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.section-body { white-space: pre-wrap; }
+.section-body { white-space: pre-wrap; margin-top: var(--space-3); }
 .selectable { cursor: text; }
 
 .note {
   border-left: 3px solid var(--amber);
   background: var(--panel-2);
-  padding: 10px 12px;
-  border-radius: 0 6px 6px 0;
-  margin: 8px 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  margin: var(--space-2) 0;
 }
-.note .anchor { color: var(--muted); font-style: italic; font-size: 12px; }
+.note .anchor { color: var(--muted); font-style: italic; font-size: var(--fs-label); }
 
-.diff-changed { border-left: 3px solid var(--accent); padding-left: 12px; }
-.diff-added { border-left: 3px solid var(--green); padding-left: 12px; }
+.diff-changed { border-left: 3px solid var(--accent); padding-left: var(--space-3); }
+.diff-added { border-left: 3px solid var(--green); padding-left: var(--space-3); }
+
+/* Wide tables scroll inside their own box rather than pushing the page wider. */
+.table-scroll { overflow-x: auto; max-width: 100%; }
 
 table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
-th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+th, td { text-align: left; padding: var(--space-2); border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.03em; }
 
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
-.stack { display: flex; flex-direction: column; gap: 8px; }
-.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.col-xs { width: var(--col-xs); }
+.col-sm { width: var(--col-sm); }
+.col-md { width: var(--col-md); }
+.col-lg { width: var(--col-lg); }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr)); gap: var(--space-3); }
+.row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.grow { flex: 1; min-width: 0; }
 .error { color: var(--red); }
-.empty { color: var(--muted); padding: 24px 0; }
+.empty { color: var(--muted); padding: var(--space-5) 0; }
+
+@media (max-width: 900px) {
+  .layout { flex-direction: column; }
+  .sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: var(--space-4);
+  }
+  .sidebar .tagline { margin-bottom: var(--space-3); }
+  .sidebar nav { display: flex; gap: var(--space-1); overflow-x: auto; }
+  .sidebar nav a { white-space: nowrap; }
+  .content { padding: var(--space-4); max-width: 100%; }
+}

@@ -56,13 +56,9 @@ export default function KnowledgePage() {
 
       <div className="card">
         <div className="row">
-          <input type="text" value={term} placeholder="Search entities" onChange={(event) => setTerm(event.target.value)} style={{ flex: 1 }} />
+          <input type="text" value={term} placeholder="Search entities" onChange={(event) => setTerm(event.target.value)} className="grow" />
           <button onClick={() => void search()}>Search</button>
-          <select
-            value={kind}
-            onChange={(event) => setKind(event.target.value)}
-            style={{ background: 'var(--panel-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px' }}
-          >
+          <select value={kind} onChange={(event) => setKind(event.target.value)}>
             <option value="">All kinds</option>
             {['module', 'file', 'class', 'interface', 'type', 'function', 'endpoint', 'database_table'].map((option) => (
               <option key={option} value={option}>
@@ -71,36 +67,44 @@ export default function KnowledgePage() {
             ))}
           </select>
         </div>
-        {summary ? <pre style={{ marginTop: 12 }}>{summary}</pre> : null}
+        {summary ? <pre>{summary}</pre> : null}
       </div>
 
       {snapshots.length > 0 ? (
-        <div className="meta" style={{ marginBottom: 12 }}>
+        <p className="card-detail">
           Latest snapshot {snapshots[0]!.sequence} at commit {snapshots[0]!.gitCommit.slice(0, 10)} ({snapshots[0]!.status})
-        </div>
+        </p>
       ) : null}
 
       <h3>
         Entities ({entities.length} of {total})
       </h3>
-      <table>
-        <thead>
-          <tr>
-            <th style={{ width: 140 }}>Kind</th>
-            <th style={{ width: 260 }}>Name</th>
-            <th>Path</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entities.map((entity) => (
-            <tr key={entity.id}>
-              <td className="meta">{entity.kind}</td>
-              <td>{entity.name}</td>
-              <td className="meta">{entity.path ?? ''}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {entities.length === 0 ? (
+        <p className="empty">
+          Nothing matches. Clear the search term or pick a different kind to see what the system has indexed.
+        </p>
+      ) : (
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th className="col-sm">Kind</th>
+                <th className="col-lg">Name</th>
+                <th>Path</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entities.map((entity) => (
+                <tr key={entity.id}>
+                  <td className="meta">{entity.kind}</td>
+                  <td>{entity.name}</td>
+                  <td className="meta">{entity.path ?? ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, type Project, type Story } from '../lib/api';
+import { relativeAge } from '../lib/relative-time';
 import { RiskBadge, StateBadge } from '../components/state-badge';
 
 export default function StoriesPage() {
@@ -63,10 +64,8 @@ export default function StoriesPage() {
       <h2>Stories</h2>
       <p className="subtitle">Describe what should change. The system researches, reviews and implements it.</p>
 
-      <div className="row" style={{ marginBottom: 12 }}>
-        <label className="meta" style={{ marginRight: 8 }}>
-          Target
-        </label>
+      <div className="toolbar">
+        <label className="card-label">Target</label>
         <select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
           {projects.map((project) => (
             <option key={project.id} value={project.id}>
@@ -90,7 +89,7 @@ export default function StoriesPage() {
           placeholder={'When a user changes their email address, send a verification email and do not treat the new address as verified until the verification completes.'}
           onChange={(event) => setBody(event.target.value)}
         />
-        <div className="row" style={{ marginTop: 12 }}>
+        <div className="actions">
           <button onClick={() => void create()} disabled={creating || !projectId || body.trim().length < 10}>
             {creating ? 'Creating...' : 'Create story'}
           </button>
@@ -100,7 +99,7 @@ export default function StoriesPage() {
       {error ? <p className="error">{error}</p> : null}
 
       {stories.length === 0 ? (
-        <p className="empty">No stories yet.</p>
+        <p className="empty">No stories yet. Describe a change above and create the first one.</p>
       ) : (
         stories.map((story) => {
           const task = story.tasks[0];
@@ -108,16 +107,17 @@ export default function StoriesPage() {
             <div key={story.id} className="card">
               <div className="card-row">
                 <div>
-                  <strong>
+                  <div className="card-value">
                     {task ? <Link href={`/tasks/${task.id}`}>{story.title}</Link> : story.title}
-                  </strong>
-                  <div className="meta">
+                  </div>
+                  <div className="card-detail">
                     revision {story.currentRevision} · {new Date(story.createdAt).toLocaleString()}
                   </div>
                 </div>
                 <div className="row">
                   {task ? <RiskBadge level={task.riskLevel} /> : null}
                   {task ? <StateBadge state={task.state} /> : <span className="badge waiting">No task</span>}
+                  <span className="age">{relativeAge(story.createdAt)}</span>
                 </div>
               </div>
             </div>

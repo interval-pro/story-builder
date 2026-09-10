@@ -35,6 +35,15 @@ const VERSION_LABELS: Record<Version['state'], string> = {
   unknown: 'unknown',
 };
 
+/** The version state is one of the two facts this page exists to show, so it
+ *  carries a badge tone rather than receding into the detail lines. */
+const VERSION_TONES: Record<Version['state'], string> = {
+  up_to_date: 'done',
+  behind: 'attention',
+  diverged: 'attention',
+  unknown: 'waiting',
+};
+
 interface ApplyRecord {
   id: string;
   status: 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'ROLLED_BACK';
@@ -118,7 +127,7 @@ export default function SystemPage() {
   }
 
   if (error) return <p className="error">{error}</p>;
-  if (!status || !health) return <p className="empty">Loading...</p>;
+  if (!status || !health) return <p className="empty">Reading the system status and the health check.</p>;
 
   const applying = syncing || apply?.status === 'RUNNING';
 
@@ -129,37 +138,44 @@ export default function SystemPage() {
 
       <div className="grid">
         <div className="card">
-          <div className="meta">Services</div>
-          <div>Database: {health.database ? 'up' : 'down'}</div>
-          <div>Sandbox manager: {health.sandboxManager ? 'up' : 'down'}</div>
-          <div>Sandboxing: {health.sandboxEnabled ? 'docker' : 'host worktrees'}</div>
+          <div className="card-label">Services</div>
+          <div className="card-value">Database: {health.database ? 'up' : 'down'}</div>
+          <div className="card-detail">Sandbox manager: {health.sandboxManager ? 'up' : 'down'}</div>
+          <div className="card-detail">Sandboxing: {health.sandboxEnabled ? 'docker' : 'host worktrees'}</div>
         </div>
         <div className="card">
-          <div className="meta">Agent engine</div>
-          <div>{health.agentEngine}</div>
-          <div className="meta">{health.agentEngineReady ? health.claudeCliVersion ?? 'ready' : 'not available'}</div>
-          <div className="meta">{health.model}</div>
+          <div className="card-label">Agent engine</div>
+          <div className="card-value">{health.agentEngine}</div>
+          <div className="card-detail">{health.agentEngineReady ? health.claudeCliVersion ?? 'ready' : 'not available'}</div>
+          <div className="card-detail">{health.model}</div>
         </div>
         <div className="card">
-          <div className="meta">Installation</div>
-          <div>{version ? `${version.tag ?? version.commit.slice(0, 10)} · ${VERSION_LABELS[version.state]}` : 'unknown'}</div>
-          <div className="meta">
+          <div className="card-label">Installation</div>
+          <div className="card-value">{version ? version.tag ?? version.commit.slice(0, 10) : 'unknown'}</div>
+          {version ? (
+            <div className="row">
+              <span className={`badge ${VERSION_TONES[version.state]}`}>{VERSION_LABELS[version.state]}</span>
+            </div>
+          ) : null}
+          <div className="card-detail">
             {version?.state === 'behind' ? `latest release ${version.latestRelease}` : null}
             {version?.state === 'diverged'
               ? `${version.localCommits} local commit(s)${version.dirty ? ' and uncommitted changes' : ''}`
               : null}
             {version?.state === 'up_to_date' ? `matches ${version.latestRelease}` : null}
           </div>
-          <div className="meta">{version?.installRoot ?? ''}</div>
-          {applying ? (
-            <div className="meta" style={{ marginTop: 8 }}>
-              {unreachable ? 'The system is restarting. This page will come back on its own.' : `Updating: ${apply?.step ?? 'starting'}`}
+          <div className="card-detail">{version?.installRoot ?? ''}</div>
+          {applying || version?.state === 'behind' ? (
+            <div className="actions">
+              {applying ? (
+                <span className="card-detail">
+                  {unreachable ? 'The system is restarting. This page will come back on its own.' : `Updating: ${apply?.step ?? 'starting'}`}
+                </span>
+              ) : null}
+              {!applying && version?.state === 'behind' ? (
+                <button onClick={() => void sync()}>Update to {version.latestRelease}</button>
+              ) : null}
             </div>
-          ) : null}
-          {!applying && version?.state === 'behind' ? (
-            <button style={{ marginTop: 8 }} onClick={() => void sync()}>
-              Update to {version.latestRelease}
-            </button>
           ) : null}
           {!applying && apply && apply.source === 'UPSTREAM' && apply.status !== 'SUCCEEDED' ? (
             <p className="error">
@@ -169,31 +185,31 @@ export default function SystemPage() {
           ) : null}
         </div>
         <div className="card">
-          <div className="meta">Repository</div>
-          <div>{status.repository.defaultBranch}</div>
-          <div className="meta">{status.repository.head?.slice(0, 10) ?? 'unknown'}</div>
-          <div className="meta">{status.repository.remoteUrl ?? 'no remote'}</div>
+          <div className="card-label">Repository</div>
+          <div className="card-value">{status.repository.defaultBranch}</div>
+          <div className="card-detail">{status.repository.head?.slice(0, 10) ?? 'unknown'}</div>
+          <div className="card-detail">{status.repository.remoteUrl ?? 'no remote'}</div>
         </div>
         <div className="card">
-          <div className="meta">Runtime manifest</div>
-          <div>{status.runtimeManifest ? `v${status.runtimeManifest.version}` : 'none'}</div>
-          <div className="meta">
+          <div className="card-label">Runtime manifest</div>
+          <div className="card-value">{status.runtimeManifest ? `v${status.runtimeManifest.version}` : 'none'}</div>
+          <div className="card-detail">
             {status.runtimeManifest?.manifest.project.language.join(', ') || 'no language detected'}
           </div>
-          <div className="meta">{status.runtimeManifest?.validated ? 'validated' : 'not validated'}</div>
+          <div className="card-detail">{status.runtimeManifest?.validated ? 'validated' : 'not validated'}</div>
         </div>
         <div className="card">
-          <div className="meta">Knowledge</div>
-          <div>{status.knowledgeSnapshot ? `snapshot ${status.knowledgeSnapshot.sequence}` : 'none'}</div>
-          <div className="meta">{status.knowledgeSnapshot?.gitCommit.slice(0, 10) ?? ''}</div>
+          <div className="card-label">Knowledge</div>
+          <div className="card-value">{status.knowledgeSnapshot ? `snapshot ${status.knowledgeSnapshot.sequence}` : 'none'}</div>
+          <div className="card-detail">{status.knowledgeSnapshot?.gitCommit.slice(0, 10) ?? ''}</div>
         </div>
         <div className="card">
-          <div className="meta">Jobs</div>
+          <div className="card-label">Jobs</div>
           {Object.entries(status.jobs).length === 0 ? (
-            <div className="meta">idle</div>
+            <div className="card-value">idle</div>
           ) : (
             Object.entries(status.jobs).map(([key, value]) => (
-              <div key={key}>
+              <div key={key} className="card-value">
                 {key}: {value}
               </div>
             ))
@@ -205,37 +221,41 @@ export default function SystemPage() {
       {status.tasks.length === 0 ? (
         <p className="empty">Nothing is running.</p>
       ) : (
-        <table>
-          <tbody>
-            {status.tasks.map((task) => (
-              <tr key={task.id}>
-                <td style={{ width: 260 }}>
-                  <Link href={`/tasks/${task.id}`}>{task.branchName}</Link>
-                </td>
-                <td style={{ width: 260 }}>
-                  <StateBadge state={task.state} />
-                </td>
-                <td className="meta">{task.baseCommit.slice(0, 10)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="table-scroll">
+          <table>
+            <tbody>
+              {status.tasks.map((task) => (
+                <tr key={task.id}>
+                  <td className="col-lg">
+                    <Link href={`/tasks/${task.id}`}>{task.branchName}</Link>
+                  </td>
+                  <td className="col-lg">
+                    <StateBadge state={task.state} />
+                  </td>
+                  <td className="meta">{task.baseCommit.slice(0, 10)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {status.conflicts.length > 0 ? (
         <>
           <h3>Open conflicts</h3>
-          <table>
-            <tbody>
-              {status.conflicts.map((conflict) => (
-                <tr key={conflict.id}>
-                  <td style={{ width: 110 }}>{conflict.severity}</td>
-                  <td style={{ width: 240 }}>{conflict.resource}</td>
-                  <td>{conflict.description}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table>
+              <tbody>
+                {status.conflicts.map((conflict) => (
+                  <tr key={conflict.id}>
+                    <td className="col-sm">{conflict.severity}</td>
+                    <td className="col-lg">{conflict.resource}</td>
+                    <td>{conflict.description}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
       ) : null}
     </div>
