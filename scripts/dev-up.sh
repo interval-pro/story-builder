@@ -62,8 +62,12 @@ WEB_STAMP="$ROOT/.run/web-build.stamp"
 # skipped one serves the cockpit from before the update. The lockfile and the
 # env file count as sources: dependencies hoist to the root, and API_BASE_URL
 # is inlined into the bundle at build time.
+# Run through bash rather than as a command: a checkout that loses the
+# executable bit would otherwise fail with exit 126 on every start, and since
+# anything but 1 means rebuild, that reads as "always stale" and quietly
+# rebuilds the cockpit every time.
 web_state=0
-"$ROOT/scripts/web-build-stale.sh" "$ROOT/apps/web" "$WEB_STAMP" \
+bash "$ROOT/scripts/web-build-stale.sh" "$ROOT/apps/web" "$WEB_STAMP" \
   "$ROOT/package-lock.json" "$ROOT/$ENV_FILE" >/dev/null || web_state=$?
 if [ "$web_state" -ne 1 ]; then
   # Rebuilding under a live server would swap the bundle out from under it.

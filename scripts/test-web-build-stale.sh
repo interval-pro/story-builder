@@ -10,12 +10,8 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 HELPER="$(pwd)/scripts/web-build-stale.sh"
 
-# dev-up.sh runs the helper directly, and a helper that cannot be executed
-# exits non-zero, which the caller reads as "rebuild". That would rebuild the
-# cockpit on every start and only a human noticing slow starts would catch it,
-# so the mode is checked here rather than left to be discovered in production.
-if [ ! -x "$HELPER" ]; then
-  echo "FAIL: scripts/web-build-stale.sh is not executable. Run: chmod 755 scripts/web-build-stale.sh" >&2
+if [ ! -f "$HELPER" ]; then
+  echo "FAIL: scripts/web-build-stale.sh is missing" >&2
   exit 1
 fi
 
@@ -58,13 +54,15 @@ fixture() {
 }
 
 # Runs the helper and checks the exit code, and optionally that stdout mentions
-# a path. Every case names itself so a failure points straight at it.
+# a path. Every case names itself so a failure points straight at it. The helper
+# is invoked through bash, which is how dev-up.sh calls it, so the test exercises
+# the real invocation path rather than one that depends on the file mode.
 expect() {
   local name="$1" want="$2" mention="$3"
   shift 3
   local out got
   checked=$((checked + 1))
-  out="$("$HELPER" "$@" 2>/dev/null)"
+  out="$(bash "$HELPER" "$@" 2>/dev/null)"
   got=$?
   if [ "$got" -ne "$want" ]; then
     fail "$name: expected exit $want, got $got"
