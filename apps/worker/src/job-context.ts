@@ -217,6 +217,7 @@ export async function createAgentRunner(input: {
     return new ClaudeCodeAgentRunner({
       workspacePath: workspacePathFor(context.task.id),
       timeoutMs: config.agents.claudeTimeoutMs,
+      resultTimeoutMs: config.agents.claudeResultTimeoutMs,
       binary: config.agents.claudeBinary,
       ...(config.agents.claudeModel ? { model: config.agents.claudeModel } : {}),
       logger: context.logger,

@@ -1,6 +1,8 @@
-import { AppError, createLogger, extractJson, newId, type Logger } from '@ai-engine/shared';
+import { createLogger, newId, type Logger } from '@ai-engine/shared';
 import type { AgentRunOutcome, AgentRunRequest, AgentRunner } from '@ai-engine/agents';
 import { runClaudeCli } from './cli';
+import { parseStructuredAnswer } from './structured-output';
+import { resultTimeoutFor } from './timeouts';
 import { policyForPhase } from './phase-policy';
 import type { ClaudeStreamEvent } from './types';
 
@@ -13,9 +15,13 @@ export interface ClaudeCodeRunnerOptions {
   binary?: string;
   timeoutMs: number;
   logger?: Logger;
+  /** Budget for the pass that writes the answer. Defaults to timeoutMs. */
+  resultTimeoutMs?: number;
   /** Called for every tool the CLI uses, so the audit log stays complete. */
   onToolUse?: (use: { name: string; input: Record<string, unknown> }) => void | Promise<void>;
 }
+
+
 
 /**
  * Runs each agent as a headless Claude Code session inside the task worktree.
@@ -71,7 +77,7 @@ export class ClaudeCodeAgentRunner implements AgentRunner {
     const answer = await runClaudeCli({
       cwd: this.options.workspacePath,
       prompt: request.resultInstruction,
-      timeoutMs: Math.min(this.options.timeoutMs, 300_000),
+      timeoutMs: resultTimeoutFor(this.options),
       resumeSessionId: work.sessionId,
       restricted: true,
       permissionMode: 'dontAsk',
@@ -80,16 +86,8 @@ export class ClaudeCodeAgentRunner implements AgentRunner {
       ...(this.options.binary ? { binary: this.options.binary } : {}),
     });
 
-    const json = extractJson(answer.text);
-    if (!json) {
-      throw new AppError('structured_output_failed', 'The agent did not return parseable JSON', 502, {
-        phase: request.phase,
-        preview: answer.text.slice(0, 500),
-      });
-    }
-
     return {
-      result: request.validate(JSON.parse(json)),
+      result: request.validate(parseStructuredAnswer(answer.text)),
       transcript: work.transcript,
       toolCallCount: work.toolUses.length,
       usage: {

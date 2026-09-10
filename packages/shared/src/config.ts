@@ -49,6 +49,8 @@ export interface AgentEngineConfig {
   /** Optional model override passed to the Claude CLI. */
   claudeModel: string | undefined;
   claudeTimeoutMs: number;
+  /** Budget for the pass that writes the answer. Defaults to claudeTimeoutMs. */
+  claudeResultTimeoutMs: number;
 }
 
 export interface GitHubConfig {
@@ -160,6 +162,7 @@ export function loadConfig(reload = false): SystemConfig {
       claudeBinary: str('CLAUDE_BINARY', 'claude'),
       claudeModel: optional('CLAUDE_MODEL'),
       claudeTimeoutMs: int('CLAUDE_TIMEOUT_MS', 3_600_000),
+      claudeResultTimeoutMs: int('CLAUDE_RESULT_TIMEOUT_MS', int('CLAUDE_TIMEOUT_MS', 3_600_000)),
     },
     github: {
       token: optional('GITHUB_TOKEN'),
