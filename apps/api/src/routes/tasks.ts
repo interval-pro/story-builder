@@ -103,7 +103,7 @@ export function registerTaskRoutes(router: HttpRouter, context: ApiContext): voi
     }
 
     const git = new GitClient(project.repoPath);
-    const status = await git.status();
+    const status = await git.status({ includeUntracked: false });
     if (!status.clean) {
       throw new ValidationError('The installation has uncommitted changes. Commit or discard them first.');
     }

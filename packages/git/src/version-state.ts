@@ -11,7 +11,7 @@ export interface InstallationVersion {
   onTag: boolean;
   /** Commits made locally on top of the tag. */
   localCommits: number;
-  /** Uncommitted changes in the installation. */
+  /** Uncommitted changes to tracked files in the installation. */
   dirty: boolean;
   /** Latest release published upstream, when it could be read. */
   latestRelease: string | null;
@@ -42,7 +42,7 @@ export async function readInstallationVersion(
 
   const commit = await git.headCommit();
   const described = await git.describeTag();
-  const status = await git.status();
+  const status = await git.status({ includeUntracked: false });
   const dirty = !status.clean;
   const localCommits = described ? await git.commitsAhead(described.tag, 'HEAD') : 0;
 

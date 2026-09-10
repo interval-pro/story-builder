@@ -93,8 +93,17 @@ export class GitClient {
     return result.exitCode === 0 ? result.stdout.trim() : null;
   }
 
-  async status(): Promise<{ clean: boolean; entries: { status: string; path: string }[] }> {
-    const result = await this.run(['status', '--porcelain=v1']);
+  /**
+   * Untracked files are included by default. Callers asking whether the code
+   * itself was changed pass includeUntracked: false, because a stray file that
+   * no commit knows about does not change what the code does.
+   */
+  async status(
+    options: { includeUntracked?: boolean } = {},
+  ): Promise<{ clean: boolean; entries: { status: string; path: string }[] }> {
+    const args = ['status', '--porcelain=v1'];
+    if (options.includeUntracked === false) args.push('--untracked-files=no');
+    const result = await this.run(args);
     const entries = result.stdout
       .split('\n')
       .filter((line) => line.trim().length > 0)
