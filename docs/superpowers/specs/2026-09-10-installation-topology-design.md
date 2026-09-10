@@ -41,9 +41,12 @@ upstream release is the expected, visible outcome of the second kind.
 ## Stage 1 scope
 
 1. **Path split.** `INSTALL_ROOT` is where the engine lives. `PROJECT_ROOT` is
-   the repository being worked on. Worktrees and artifacts default to
-   `<INSTALL_ROOT>/.ai-workspaces` and `<INSTALL_ROOT>/.artifacts`, so the
-   project repository stays clean.
+   the repository being worked on. Worktrees and artifacts live under
+   `<INSTALL_ROOT>.state`, beside the installation rather than inside it: the
+   installation directory is replaced wholesale when a new version is
+   installed, while the database that indexes them survives, and keeping the
+   two halves of that state on different lifetimes leaves rows pointing at
+   files that are gone.
 2. **Ownership of files.** Agent prompts, policies and installation defaults are
    read from the installation. The runtime manifest and project rules stay with
    the project, because they describe the project.

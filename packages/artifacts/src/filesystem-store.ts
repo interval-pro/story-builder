@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
-import { loadConfig, newId } from '@ai-engine/shared';
+import { loadConfig, newId, NotFoundError } from '@ai-engine/shared';
 import type { ArtifactRecord } from '@ai-engine/domain';
 import { ArtifactRepository, type Queryable } from '@ai-engine/db';
 import type { ArtifactStore, PutArtifactInput } from './artifact-store';
@@ -64,8 +64,16 @@ export class FilesystemArtifactStore implements ArtifactStore {
 
   async get(id: string): Promise<{ record: ArtifactRecord; content: Buffer }> {
     const record = await this.repository.getById(id);
-    const content = await readFile(this.resolve(record.storagePath));
-    return { record, content };
+    try {
+      return { record, content: await readFile(this.resolve(record.storagePath)) };
+    } catch (error) {
+      // The row outlives the file when the store is moved or cleared, and a
+      // caller can only recover from that if it is told the artifact is gone.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new NotFoundError('Artifact', id);
+      }
+      throw error;
+    }
   }
 
   async getText(id: string): Promise<string> {

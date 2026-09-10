@@ -140,3 +140,8 @@ node apps/cli/dist/main.js init --repo "$REPO" --install-root "$INSTALL_DIR"
 echo
 echo "Installed. Start it with:"
 echo "  cd $INSTALL_DIR && ./scripts/dev-up.sh"
+echo
+echo "Worktrees and artifacts live in ${INSTALL_DIR}.state and the database lives in"
+echo "the ${PG_CONTAINER} container. Both survive installing a new version, so removing"
+echo "$INSTALL_DIR alone is safe."
+

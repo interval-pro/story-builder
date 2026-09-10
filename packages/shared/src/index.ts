@@ -7,3 +7,4 @@ export * from './text';
 export * from './result';
 export * from './http';
 export * from './installation';
+export * from './paths';

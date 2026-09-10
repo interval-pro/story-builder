@@ -66,10 +66,20 @@ export async function handleResearch(context: JobContext): Promise<void> {
   // a second time.
   const existing = await context.repos.artifacts.latestByKind(context.task.id, 'research_findings_json');
   if (existing) {
-    context.logger.info('reusing the research findings from an earlier attempt', { artifactId: existing.id });
-    const findings = validateResearchFindings(JSON.parse(await context.artifacts.getText(existing.id)));
-    await generateReview(context, { projectContext, findings, previousReview: null });
-    return;
+    // Reuse is an optimisation, never a requirement. If the earlier findings
+    // cannot be read back the task researches again rather than failing on
+    // every retry with the same unreadable artifact.
+    try {
+      const findings = validateResearchFindings(JSON.parse(await context.artifacts.getText(existing.id)));
+      context.logger.info('reusing the research findings from an earlier attempt', { artifactId: existing.id });
+      await generateReview(context, { projectContext, findings, previousReview: null });
+      return;
+    } catch (error) {
+      context.logger.warn('the earlier research findings could not be read, researching again', {
+        artifactId: existing.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   const researchPrompt = await loadAgentPrompt('research', context.installRoot);

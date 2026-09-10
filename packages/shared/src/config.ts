@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { AppError } from './errors';
+import { stateRootFor } from './paths';
 
 export interface DatabaseConfig {
   url: string;
@@ -17,8 +18,10 @@ export interface AiProviderConfig {
 }
 
 export interface PathsConfig {
-  /** Absolute path of the installation: the engine, its prompts and its state. */
+  /** Absolute path of the installation: the engine and its prompts. */
   installRoot: string;
+  /** Where worktrees and artifacts live, so they survive a new installation. */
+  stateRoot: string;
   /** Absolute path of the repository this installation works on. */
   projectRoot: string;
   /** Root directory that holds one Git worktree per task. */
@@ -122,6 +125,7 @@ export function loadConfig(reload = false): SystemConfig {
   const apiPort = int('API_PORT', 4000);
   const sandboxManagerPort = int('SANDBOX_MANAGER_PORT', 4100);
   const installRoot = str('INSTALL_ROOT', process.cwd());
+  const stateRoot = str('STATE_ROOT', stateRootFor(installRoot));
   cached = {
     database: {
       url: str('DATABASE_URL', 'postgres://ai_engine:ai_engine@localhost:5432/ai_engine'),
@@ -138,11 +142,13 @@ export function loadConfig(reload = false): SystemConfig {
     },
     paths: {
       installRoot,
+      stateRoot,
       projectRoot: str('PROJECT_ROOT', process.cwd()),
-      // Worktrees and artifacts belong to the installation, so the repository
-      // being worked on never accumulates state the system owns.
-      workspacesRoot: str('WORKSPACES_ROOT', path.join(installRoot, '.ai-workspaces')),
-      artifactsRoot: str('ARTIFACTS_ROOT', path.join(installRoot, '.artifacts')),
+      // Beside the installation, not inside it: installing a new version
+      // replaces that directory, and the database indexing this would then
+      // point at files that no longer exist.
+      workspacesRoot: str('WORKSPACES_ROOT', path.join(stateRoot, 'workspaces')),
+      artifactsRoot: str('ARTIFACTS_ROOT', path.join(stateRoot, 'artifacts')),
     },
     service: {
       env: (str('NODE_ENV', 'development') as ServiceConfig['env']),

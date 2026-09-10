@@ -16,10 +16,13 @@ fi
 set -a; . "./$ENV_FILE"; set +a
 
 # Worktrees and artifacts belong to the installation, not to the repository
-# being worked on, so they default to here rather than to PROJECT_ROOT.
+# being worked on. They sit beside it rather than inside it, because installing
+# a new version replaces the installation directory while the database that
+# indexes them survives.
 export INSTALL_ROOT="${INSTALL_ROOT:-$ROOT}"
-export WORKSPACES_ROOT="${WORKSPACES_ROOT:-$INSTALL_ROOT/.ai-workspaces}"
-export ARTIFACTS_ROOT="${ARTIFACTS_ROOT:-$INSTALL_ROOT/.artifacts}"
+export STATE_ROOT="${STATE_ROOT:-$INSTALL_ROOT.state}"
+export WORKSPACES_ROOT="${WORKSPACES_ROOT:-$STATE_ROOT/workspaces}"
+export ARTIFACTS_ROOT="${ARTIFACTS_ROOT:-$STATE_ROOT/artifacts}"
 PG_CONTAINER="${PG_CONTAINER:-ai-engine-postgres}"
 PG_PORT="${PG_PORT:-5433}"
 mkdir -p "$WORKSPACES_ROOT" "$ARTIFACTS_ROOT" .run
