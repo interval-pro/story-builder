@@ -6,3 +6,4 @@ export * from './event-types';
 export * from './job-types';
 export * from './entities';
 export * from './impact';
+export * from './task-size';

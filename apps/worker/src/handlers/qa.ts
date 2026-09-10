@@ -1,10 +1,12 @@
 import { AppError, loadConfig } from '@ai-engine/shared';
+import { classifyTaskSize } from '@ai-engine/domain';
 import { loadAgentPrompt, runQaAgent } from '@ai-engine/agents';
 import { fullDiff, GitClient } from '@ai-engine/git';
 import {
   buildProjectContext,
   createAgentRunner,
   createExecutor,
+  ensureDependencies,
   recordEngineMetrics,
   resolveAgentVersion,
   workspacePathFor,
@@ -20,6 +22,7 @@ async function runProjectTests(context: JobContext, runId: string): Promise<{ co
     return [{ command: '(no test command in the runtime manifest)', exitCode: 0, output: 'No test command is configured for this project.' }];
   }
 
+  await ensureDependencies(context);
   const executor = createExecutor(context.task.id);
   const results: { command: string; exitCode: number; output: string }[] = [];
 
@@ -107,7 +110,11 @@ export async function handleQa(context: JobContext): Promise<void> {
     const diff = await fullDiff(git, context.task.baseCommit);
 
     // QA gets a fresh session on purpose: it must not see the implementation's reasoning.
-    const runner = await createAgentRunner({ context, runId: run.id, phase: 'QA', allowWeb: false });
+    const size = classifyTaskSize({
+      fileCount: approved.document.expectedFiles.length,
+      riskSignalCount: approved.document.riskSignals.length,
+    });
+    const runner = await createAgentRunner({ context, runId: run.id, phase: 'QA', allowWeb: false, size });
 
     const { report, outcome } = await runQaAgent({
       runner,

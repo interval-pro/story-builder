@@ -7,6 +7,7 @@ import {
   validateResearchFindings,
   type AgentRunOutcome,
 } from '@ai-engine/agents';
+import { classifyTaskSize } from '@ai-engine/domain';
 import { impactFromReview, ConflictEngine } from '@ai-engine/conflict-engine';
 import { KnowledgeService } from '@ai-engine/project-knowledge';
 import {
@@ -166,7 +167,11 @@ export async function generateReview(
   });
 
   try {
-    const runner = await createAgentRunner({ context, runId: reviewRun.id, phase: 'REVIEW' });
+    const size = classifyTaskSize({
+      fileCount: input.findings.relevantFiles.length,
+      riskSignalCount: input.findings.riskSignals.length,
+    });
+    const runner = await createAgentRunner({ context, runId: reviewRun.id, phase: 'REVIEW', size });
 
     const { document, outcome, problems } = await runReviewAgent({
       runner,

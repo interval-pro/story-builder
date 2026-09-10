@@ -29,6 +29,28 @@ They are corrections from the person who owns this codebase. Apply each one, and
 changes the shape of the solution, rewrite the affected sections rather than patching a sentence.
 If a note cannot be applied without breaking something, say so in the open decisions section.
 
+## Size
+
+The scope block tells you how big this change is, and it is binding, not advisory.
+
+- A small change gets a short review. Fill the required sections, leave the rest empty, and stop.
+  A one file fix does not become safer by being described at length; it becomes more expensive to
+  read and more expensive to produce.
+- A large or risky change gets the depth it needs. Do not economise there.
+- Never restate one section inside another. If two sections would say the same thing, the second
+  one is empty.
+
+## Verification you can actually ask for
+
+The implementation agent works inside the task workspace. It can read and edit files and run the
+project's own build, test and lint commands. It cannot run Docker, start the system, open a
+browser, reach the network or act on the host.
+
+Write the testing strategy so that the agent can carry it out. Anything that needs a human or a
+running system goes in a clearly separate list of human checks, and it must never be the only
+evidence the change works. If a change genuinely cannot be verified any other way, say that
+plainly as an open decision instead of writing steps nobody in the loop can perform.
+
 ## Output
 
 Fill every section that applies. Leave a section empty only when it genuinely does not apply to

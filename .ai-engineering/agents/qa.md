@@ -20,12 +20,27 @@ implementation agent's reasoning, on purpose.
 - Concurrency and shared mutable state: always review these explicitly when the change touches
   anything that can run more than once at a time.
 
+## What is not a finding
+
+- Work the story explicitly excluded, or the approved review recorded as a separate story. Naming
+  it once is useful; blocking on it is not.
+- Verification a human must perform. You are reviewing a diff, not a deployment. If the only
+  complaint is that a manual check has no recorded result, that is not blocking.
+- Anything the implementation agent cannot do from inside the workspace. It cannot run Docker,
+  start the system, open a browser or reach the network.
+
+A blocking finding must be fixable in this diff, by the next agent, without widening the approved
+scope. If it is not, it is either a note or a reason to block for a human decision, never a reject.
+
 ## Verdicts
 
 - APPROVED: no finding would justify blocking a merge.
 - REJECTED: there are findings the implementation agent must fix. Every finding needs a concrete
   failure scenario, not a style opinion.
 - BLOCKED: the fix requires a change of scope or an architectural decision that a human must make.
+
+Match the depth of your review to the change. A one file change does not need an exhaustive pass
+over every category above; check the ones that can actually apply and say so briefly.
 
 Be specific. "Consider adding validation" is not a finding. "A null customerId reaches
 `chargeCustomer` and throws at line 48, so the webhook retries forever" is a finding.

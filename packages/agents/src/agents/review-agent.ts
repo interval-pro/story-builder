@@ -1,5 +1,13 @@
 import type { ReviewDocument, ReviewNote, Story, StoryRevision, Task } from '@ai-engine/domain';
-import { REVIEW_SECTIONS, REVIEW_SECTION_TITLES, validateReviewDocument as checkReviewDocument } from '@ai-engine/domain';
+import {
+  classifyTaskSize,
+  requiredSectionsFor,
+  reviewBudgetFor,
+  REVIEW_SECTIONS,
+  REVIEW_SECTION_TITLES,
+  validateReviewDocument as checkReviewDocument,
+  type TaskSize,
+} from '@ai-engine/domain';
 import { renderProjectContext, renderReviewWithNotes, renderStoryContext, type ProjectContext } from '../context';
 import { loadAgentPrompt } from '../prompts/prompt-loader';
 import { validateReviewDocument } from '../schemas';
@@ -21,8 +29,11 @@ export interface ReviewAgentInput {
   onStep?: (step: AgentStep) => Promise<void> | void;
 }
 
-function resultInstruction(): string {
-  const sectionList = REVIEW_SECTIONS.map((key) => `    "${key}": "${REVIEW_SECTION_TITLES[key]}"`).join(',\n');
+function resultInstruction(size: TaskSize): string {
+  const required = new Set(requiredSectionsFor(size));
+  const sectionList = REVIEW_SECTIONS.map(
+    (key) => `    "${key}": "${REVIEW_SECTION_TITLES[key]}"${required.has(key) ? ' (required)' : ' (optional)'}`,
+  ).join(',\n');
   return `Now produce the review as a single JSON object with exactly this shape:
 
 {
@@ -37,7 +48,12 @@ ${sectionList}
   "openQuestions": ["string"]
 }
 
-Each value in "sections" is the markdown body of that section, not its title.
+Each value in "sections" is the markdown body of that section, not its title. Every key must be
+present. Give the optional ones an empty string unless they carry a fact the implementer needs;
+an empty section is better than a restatement of another one.
+
+${reviewBudgetFor(size).guidance}
+
 Return only the JSON object.`;
 }
 
@@ -56,7 +72,20 @@ export async function runReviewAgent(
     'You can inspect the repository read-only to verify anything the research left unclear.',
   ].join('\n');
 
-  const userParts = [renderStoryContext(input.story, input.revision, input.task), '', renderResearchFindings(input.findings)];
+  // The research already knows how much of the repository this touches, so the
+  // review is sized from it rather than treating every story as a large one.
+  const size = classifyTaskSize({
+    fileCount: input.findings.relevantFiles.length,
+    riskSignalCount: input.findings.riskSignals.length,
+  });
+
+  const userParts = [
+    renderStoryContext(input.story, input.revision, input.task),
+    '',
+    `## Scope\n\nThis change is ${size.toLowerCase()}. ${reviewBudgetFor(size).guidance}`,
+    '',
+    renderResearchFindings(input.findings),
+  ];
 
   if (input.previousReview) {
     userParts.push(
@@ -82,9 +111,9 @@ export async function runReviewAgent(
     prompt: userParts.join('\n'),
     maxIterations: input.maxIterations ?? 25,
     ...(input.onStep ? { onStep: input.onStep } : {}),
-    resultInstruction: resultInstruction(),
+    resultInstruction: resultInstruction(size),
     validate: validateReviewDocument,
   });
 
-  return { document: outcome.result, outcome, problems: checkReviewDocument(outcome.result) };
+  return { document: outcome.result, outcome, problems: checkReviewDocument(outcome.result, size) };
 }

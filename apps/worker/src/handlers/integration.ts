@@ -2,7 +2,7 @@ import { AppError, loadConfig } from '@ai-engine/shared';
 import { changedFiles, GitClient } from '@ai-engine/git';
 import { createRemoteProvider } from '@ai-engine/github';
 import { rebaseOntoBase } from '@ai-engine/conflict-engine';
-import { commitWorkspace, createExecutor, workspacePathFor, type JobContext } from '../job-context';
+import { commitWorkspace, createExecutor, ensureDependencies, workspacePathFor, type JobContext } from '../job-context';
 
 /**
  * Runs before every pull request: rebase onto the current base, re-run the
@@ -38,6 +38,7 @@ export async function handleIntegrationValidation(context: JobContext): Promise<
     });
   }
 
+  await ensureDependencies(context);
   const manifest = await context.repos.runtimeManifests.latest(context.project.id);
   const executor = createExecutor(context.task.id);
   const commands = [...(manifest?.manifest.build.commands ?? []), ...(manifest?.manifest.test.commands ?? [])];

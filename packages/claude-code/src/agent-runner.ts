@@ -3,7 +3,7 @@ import type { AgentRunOutcome, AgentRunRequest, AgentRunner } from '@ai-engine/a
 import { runClaudeCli } from './cli';
 import { parseStructuredAnswer } from './structured-output';
 import { resultTimeoutFor } from './timeouts';
-import { policyForPhase } from './phase-policy';
+import { policyForPhase, type PhasePolicy } from './phase-policy';
 import type { ClaudeStreamEvent } from './types';
 
 const logger = createLogger('claude-code-runner');
@@ -17,6 +17,12 @@ export interface ClaudeCodeRunnerOptions {
   logger?: Logger;
   /** Budget for the pass that writes the answer. Defaults to timeoutMs. */
   resultTimeoutMs?: number;
+  /**
+   * Overrides the reasoning effort the phase would otherwise ask for. A small
+   * change does not need the depth a large one does, and effort is the single
+   * biggest lever on what a run costs.
+   */
+  effort?: PhasePolicy['effort'];
   /** Called for every tool the CLI uses, so the audit log stays complete. */
   onToolUse?: (use: { name: string; input: Record<string, unknown> }) => void | Promise<void>;
 }
@@ -35,7 +41,8 @@ export class ClaudeCodeAgentRunner implements AgentRunner {
   constructor(private readonly options: ClaudeCodeRunnerOptions) {}
 
   async run<T>(request: AgentRunRequest<T>): Promise<AgentRunOutcome<T>> {
-    const policy = policyForPhase(request.phase);
+    const basePolicy = policyForPhase(request.phase);
+    const policy: PhasePolicy = this.options.effort ? { ...basePolicy, effort: this.options.effort } : basePolicy;
     const sessionId = request.resumeSessionId ?? newId();
     let iteration = 0;
 

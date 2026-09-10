@@ -1,3 +1,5 @@
+import { requiredSectionsFor, type TaskSize } from './task-size';
+
 /**
  * The engineering review is a structured document, not free text. The section
  * list is fixed so that review versions can be diffed against each other.
@@ -102,10 +104,16 @@ export function emptyReviewDocument(): ReviewDocument {
   };
 }
 
-export function validateReviewDocument(document: ReviewDocument): string[] {
+/**
+ * Which sections must be filled depends on how big the change is: a one file
+ * fix earns a short review, and demanding the full twenty two sections for it
+ * is what made small stories expensive.
+ */
+export function validateReviewDocument(document: ReviewDocument, size?: TaskSize): string[] {
   const problems: string[] = [];
   const byKey = new Map(document.sections.map((section) => [section.key, section]));
-  for (const key of REQUIRED_REVIEW_SECTIONS) {
+  const required = size ? requiredSectionsFor(size) : REQUIRED_REVIEW_SECTIONS;
+  for (const key of required) {
     const section = byKey.get(key);
     if (!section || section.body.trim().length === 0) {
       problems.push(`Required section "${REVIEW_SECTION_TITLES[key]}" is empty.`);

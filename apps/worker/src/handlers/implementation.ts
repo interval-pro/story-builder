@@ -1,5 +1,5 @@
 import { AppError } from '@ai-engine/shared';
-import type { QaFinding } from '@ai-engine/domain';
+import { classifyTaskSize, type QaFinding } from '@ai-engine/domain';
 import { loadAgentPrompt, runImplementationAgent } from '@ai-engine/agents';
 import { ConflictEngine } from '@ai-engine/conflict-engine';
 import { changedFiles, GitClient } from '@ai-engine/git';
@@ -7,6 +7,7 @@ import {
   buildProjectContext,
   createAgentRunner,
   commitWorkspace,
+  ensureDependencies,
   recordEngineMetrics,
   resolveAgentVersion,
   workspacePathFor,
@@ -51,6 +52,7 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
     mode: 'READ_WRITE',
   });
   await sandbox.setMode(context.task.id, 'READ_WRITE');
+  await ensureDependencies(context);
 
   await context.orchestrator.ensureState({
     taskId: context.task.id,
@@ -73,7 +75,17 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
   });
 
   try {
-    const runner = await createAgentRunner({ context, runId: run.id, phase: 'IMPLEMENTATION', allowWeb: false });
+    const size = classifyTaskSize({
+      fileCount: approved.document.expectedFiles.length,
+      riskSignalCount: approved.document.riskSignals.length,
+    });
+    const runner = await createAgentRunner({
+      context,
+      runId: run.id,
+      phase: 'IMPLEMENTATION',
+      allowWeb: false,
+      size,
+    });
     // A fix cycle continues the session that wrote the code in the first place.
     const previousSessionId = mode === 'FIX' ? await lastImplementationSession(context) : null;
 

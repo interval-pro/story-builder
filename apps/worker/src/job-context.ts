@@ -1,5 +1,6 @@
+import { access, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { createLogger, loadConfig, type Logger } from '@ai-engine/shared';
+import { AppError, createLogger, loadConfig, type Logger } from '@ai-engine/shared';
 import {
   capabilitiesForPhase,
   type ExecutionPhase,
@@ -8,6 +9,7 @@ import {
   type Story,
   type StoryRevision,
   type Task,
+  type TaskSize,
 } from '@ai-engine/domain';
 import { createRepositories, type Database, type Repositories } from '@ai-engine/db';
 import { EventLog } from '@ai-engine/events';
@@ -95,6 +97,12 @@ export async function buildProjectContext(context: JobContext): Promise<ProjectC
     knowledgeSummary,
   };
 }
+
+const EFFORT_BY_SIZE: Record<TaskSize, 'low' | 'medium' | 'high'> = {
+  SMALL: 'low',
+  STANDARD: 'medium',
+  LARGE: 'high',
+};
 
 export function workspacePathFor(taskId: string): string {
   return path.join(loadConfig().paths.workspacesRoot, `task-${taskId}`);
@@ -209,6 +217,8 @@ export async function createAgentRunner(input: {
   runId: string;
   phase: ExecutionPhase;
   allowWeb?: boolean;
+  /** Scales reasoning effort to the change. Omitted means the phase default. */
+  size?: TaskSize;
 }): Promise<AgentRunner> {
   const config = loadConfig();
   const { context, runId, phase } = input;
@@ -220,6 +230,7 @@ export async function createAgentRunner(input: {
       timeoutMs: config.agents.claudeTimeoutMs,
       resultTimeoutMs: config.agents.claudeResultTimeoutMs,
       binary: config.agents.claudeBinary,
+      ...(input.size ? { effort: EFFORT_BY_SIZE[input.size] } : {}),
       ...(config.agents.claudeModel ? { model: config.agents.claudeModel } : {}),
       logger: context.logger,
       onToolUse: async (use) => {
@@ -303,4 +314,54 @@ export async function commitWorkspace(context: JobContext, git: GitClient): Prom
     name: 'AI Engineering System',
     email: 'ai-engine@localhost',
   });
+}
+
+/** Kept outside the worktree so it can never be committed with the change. */
+function setupMarkerFor(taskId: string): string {
+  return path.join(loadConfig().paths.workspacesRoot, `.setup-${taskId}`);
+}
+
+/**
+ * Installs the project's dependencies in the task worktree.
+ *
+ * A worktree is a bare checkout: it inherits nothing that was installed beside
+ * the working copy, so a build or a test run in it fails on a missing toolchain
+ * rather than on the change. The runtime manifest already declares how this
+ * project installs, and this is the only place that runs it. A marker file
+ * keeps it to once per worktree instead of once per phase.
+ */
+export async function ensureDependencies(context: JobContext): Promise<void> {
+  const workspacePath = workspacePathFor(context.task.id);
+  const marker = setupMarkerFor(context.task.id);
+  try {
+    await access(marker);
+    return;
+  } catch {
+    // Not installed yet.
+  }
+
+  const manifest = await context.repos.runtimeManifests.latest(context.project.id);
+  const commands = manifest?.manifest.setup.commands ?? [];
+  if (commands.length === 0) {
+    context.logger.warn('the runtime manifest declares no setup command, so the worktree keeps whatever it has');
+    return;
+  }
+
+  const executor = createExecutor(context.task.id);
+  for (const command of commands) {
+    context.logger.info('installing dependencies in the worktree', { command });
+    const outcome = await executor.run({
+      command,
+      cwd: workspacePath,
+      timeoutMs: loadConfig().sandbox.commandTimeoutMs,
+    });
+    if (outcome.exitCode !== 0) {
+      throw new AppError('setup_failed', `Setup command failed in the task workspace: ${command}`, 500, {
+        command,
+        exitCode: outcome.exitCode,
+        output: outcome.stdout.slice(-4000) + outcome.stderr.slice(-4000),
+      });
+    }
+  }
+  await writeFile(marker, `${new Date().toISOString()}\n`, 'utf8');
 }
