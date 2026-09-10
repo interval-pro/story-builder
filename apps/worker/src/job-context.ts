@@ -15,6 +15,7 @@ import { FilesystemArtifactStore, type ArtifactStore } from '@ai-engine/artifact
 import { createProviderOrMock } from '@ai-engine/ai-provider';
 import { ALL_TOOLS, LocalCommandExecutor, SandboxCommandExecutor, ToolRegistry, toolPolicyVersion, type CommandExecutor, type ToolContext } from '@ai-engine/tools';
 import { ClaudeCodeAgentRunner } from '@ai-engine/claude-code';
+import { GitClient } from '@ai-engine/git';
 import { SecretsService } from '@ai-engine/security';
 import { ProjectBrain } from '@ai-engine/project-brain';
 import { KnowledgeService } from '@ai-engine/project-knowledge';
@@ -285,4 +286,21 @@ export async function recordEngineMetrics(
       payload: { denied: outcome.permissionDenials.length, details: outcome.permissionDenials.slice(0, 10) },
     });
   }
+}
+
+/**
+ * Commits whatever the agent left in the worktree.
+ *
+ * Nothing else commits before integration, so an uncommitted phase result only
+ * survives while its worktree does. Committing at the end of each run makes the
+ * branch the record instead, which is what lets a retry or a fix continue from
+ * the work rather than from the base commit.
+ */
+export async function commitWorkspace(context: JobContext, git: GitClient): Promise<string | null> {
+  await git.addAll();
+  if (!(await git.hasStagedChanges())) return null;
+  return git.commit(`ai: ${context.story.title}`.slice(0, 100), {
+    name: 'AI Engineering System',
+    email: 'ai-engine@localhost',
+  });
 }

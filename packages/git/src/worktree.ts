@@ -1,9 +1,13 @@
-import { rm, mkdir } from 'node:fs/promises';
+import { access, realpath, rm, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { createLogger } from '@ai-engine/shared';
 import { GitClient } from './git-client';
 
 const logger = createLogger('git-worktree');
+
+async function canonical(target: string): Promise<string> {
+  return realpath(target).catch(() => path.resolve(target));
+}
 
 export interface WorktreeInfo {
   path: string;
@@ -17,8 +21,12 @@ export interface WorktreeInfo {
  */
 export class WorktreeManager {
   private readonly git: GitClient;
+  private readonly repositoryPath: string;
+  private readonly workspacesRoot: string;
 
-  constructor(private readonly repositoryPath: string, private readonly workspacesRoot: string) {
+  constructor(repositoryPath: string, workspacesRoot: string) {
+    this.repositoryPath = repositoryPath;
+    this.workspacesRoot = workspacesRoot;
     this.git = new GitClient(repositoryPath);
   }
 
@@ -26,9 +34,20 @@ export class WorktreeManager {
     return path.join(this.workspacesRoot, `task-${taskId}`);
   }
 
+  /**
+   * A task re-enters a phase more than once: a retry, and every fix after QA.
+   * Work in the worktree is not committed until integration, so an existing
+   * worktree on the right branch is reused rather than rebuilt. Rebuilding it
+   * would silently discard everything the previous run produced.
+   */
   async create(input: { taskId: string; branch: string; baseCommit: string }): Promise<WorktreeInfo> {
     const workspacePath = this.workspacePathFor(input.taskId);
     await mkdir(this.workspacesRoot, { recursive: true });
+
+    if (await this.usable(input.taskId, input.branch)) {
+      logger.info('reusing the existing worktree', { workspacePath, branch: input.branch });
+      return { path: workspacePath, branch: input.branch, baseCommit: input.baseCommit };
+    }
     await this.remove(input.taskId, { force: true });
 
     const branchExists = await this.git.branchExists(input.branch);
@@ -40,10 +59,28 @@ export class WorktreeManager {
     return { path: workspacePath, branch: input.branch, baseCommit: input.baseCommit };
   }
 
+  /** Registered, present on disk and on the branch this task works on. */
+  private async usable(taskId: string, branch: string): Promise<boolean> {
+    if (!(await this.exists(taskId))) return false;
+    try {
+      await access(this.workspacePathFor(taskId));
+    } catch {
+      return false;
+    }
+    const current = await this.clientFor(taskId).currentBranch().catch(() => null);
+    return current === branch;
+  }
+
   async exists(taskId: string): Promise<boolean> {
     const listed = await this.list();
-    const target = this.workspacePathFor(taskId);
-    return listed.some((entry) => path.resolve(entry.path) === path.resolve(target));
+    // Git reports the real path. A workspaces root reached through a symlink,
+    // which is what a macOS temporary directory is, would otherwise never
+    // match the path we hand out.
+    const target = await canonical(this.workspacePathFor(taskId));
+    for (const entry of listed) {
+      if ((await canonical(entry.path)) === target) return true;
+    }
+    return false;
   }
 
   async list(): Promise<{ path: string; branch: string | null; head: string | null }[]> {

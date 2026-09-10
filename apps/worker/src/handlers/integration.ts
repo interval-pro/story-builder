@@ -2,7 +2,7 @@ import { AppError, loadConfig } from '@ai-engine/shared';
 import { changedFiles, GitClient } from '@ai-engine/git';
 import { createRemoteProvider } from '@ai-engine/github';
 import { rebaseOntoBase } from '@ai-engine/conflict-engine';
-import { createExecutor, workspacePathFor, type JobContext } from '../job-context';
+import { commitWorkspace, createExecutor, workspacePathFor, type JobContext } from '../job-context';
 
 /**
  * Runs before every pull request: rebase onto the current base, re-run the
@@ -13,14 +13,8 @@ export async function handleIntegrationValidation(context: JobContext): Promise<
   const workspacePath = workspacePathFor(context.task.id);
   const git = new GitClient(workspacePath);
 
-  // Uncommitted work is committed first so the rebase has something to move.
-  await git.addAll();
-  if (await git.hasStagedChanges()) {
-    await git.commit(`ai: ${context.story.title}`.slice(0, 100), {
-      name: 'AI Engineering System',
-      email: 'ai-engine@localhost',
-    });
-  }
+  // Anything the last phase left behind is committed so the rebase can move it.
+  await commitWorkspace(context, git);
 
   const rebase = await rebaseOntoBase({ workspacePath, baseBranch: context.task.baseBranch });
   if (!rebase.rebased) {

@@ -6,6 +6,7 @@ import { changedFiles, GitClient } from '@ai-engine/git';
 import {
   buildProjectContext,
   createAgentRunner,
+  commitWorkspace,
   recordEngineMetrics,
   resolveAgentVersion,
   workspacePathFor,
@@ -146,6 +147,11 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
 
     await context.repos.runs.complete(run.id, agentRun.usage);
     await recordEngineMetrics(context, 'implementation', agentRun);
+
+    // The branch, not the worktree, is what survives. Without this a retry or a
+    // fix would start again from the base commit.
+    await commitWorkspace(context, git);
+
     await context.orchestrator.checkpoint({
       taskId: context.task.id,
       runId: run.id,
