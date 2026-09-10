@@ -97,6 +97,16 @@ export async function initCommand(options: {
     const project = await commands.ensureProject({ name: path.basename(root), repoPath: root });
     success(project.created ? 'Project registered' : 'Project already registered');
 
+    // The installation is a project too, so a story can change the engine that
+    // serves this repository without touching the repository.
+    step('Registering the installation as a project');
+    const installProject = await commands.ensureProject({
+      name: `${path.basename(options.installRoot)} (installation)`,
+      repoPath: path.resolve(options.installRoot),
+      kind: 'INSTALLATION',
+    });
+    success(installProject.created ? 'Installation registered' : 'Installation already registered');
+
     step('Writing the installation marker');
     await writeInstallationMarker(root, {
       installRoot: path.resolve(options.installRoot),
@@ -126,10 +136,21 @@ export async function initCommand(options: {
     });
     success(`Knowledge snapshot ${snapshot.sequence} built from ${extraction.entities.length} entities`);
 
+    step('Building the knowledge for the installation');
+    const installManifest = await detectRuntimeManifest(options.installRoot);
+    await repositories.runtimeManifests.create(installProject.id, installManifest);
+    const installKnowledge = await knowledge.buildSnapshot({
+      projectId: installProject.id,
+      gitCommit: await installGit.headCommit(),
+      repositoryPath: path.resolve(options.installRoot),
+    });
+    success(`Installation snapshot ${installKnowledge.snapshot.sequence} built`);
+
     heading('Ready');
     table([
       ['Project', root],
       ['Installation', options.installRoot],
+      ['Installation branch', await installGit.currentBranch().catch(() => 'detached')],
       ['Version', version.tag ?? version.commit.slice(0, 10)],
       ['Latest release', latest?.tag ?? 'unknown'],
       ['Default branch', defaultBranch],

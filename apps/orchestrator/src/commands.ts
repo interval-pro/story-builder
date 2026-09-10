@@ -2,6 +2,7 @@ import { AppError, createLogger, newId, slugify } from '@ai-engine/shared';
 import {
   classifyRisk,
   requiresSecondApproval,
+  type ProjectKind,
   type RiskSignal,
   type Story,
   type StoryRevision,
@@ -20,7 +21,6 @@ export interface CreateStoryInput {
   projectId: string;
   title?: string;
   body: string;
-  kind?: 'PROJECT_TASK' | 'SYSTEM_TASK';
   actor: Actor;
   /** Start the analysis immediately instead of leaving the task in DRAFT. */
   startAnalysis?: boolean;
@@ -57,7 +57,6 @@ export class TaskCommands {
         projectId: project.id,
         title: input.title ?? deriveTitle(input.body),
         body: input.body,
-        kind: input.kind ?? 'PROJECT_TASK',
       });
 
       const snapshot = await txRepos.knowledge.latestReady(project.id);
@@ -68,7 +67,6 @@ export class TaskCommands {
         branchName: `ai/story-${slugify(story.title)}-${story.id.slice(0, 8)}`,
         baseBranch,
         baseCommit,
-        kind: input.kind ?? 'PROJECT_TASK',
         knowledgeSnapshotId: snapshot?.id ?? null,
       });
 
@@ -364,7 +362,11 @@ export class TaskCommands {
   }
 
   /** Used by the CLI to register the repository this installation manages. */
-  async ensureProject(input: { name: string; repoPath: string }): Promise<{ id: string; created: boolean }> {
+  async ensureProject(input: {
+    name: string;
+    repoPath: string;
+    kind?: ProjectKind;
+  }): Promise<{ id: string; created: boolean }> {
     const repos = createRepositories(this.db);
     const existing = await repos.projects.findByRepoPath(input.repoPath);
     if (existing) return { id: existing.id, created: false };
@@ -376,6 +378,7 @@ export class TaskCommands {
       repoPath: input.repoPath,
       defaultBranch,
       remoteUrl,
+      kind: input.kind ?? 'PROJECT',
     });
     const events = new EventLog(this.db);
     await events.append({

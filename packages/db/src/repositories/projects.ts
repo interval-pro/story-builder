@@ -1,18 +1,31 @@
 import { newId, NotFoundError } from '@ai-engine/shared';
-import type { Project } from '@ai-engine/domain';
+import type { Project, ProjectKind } from '@ai-engine/domain';
 import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
 
-const COLUMNS = 'id, name, repo_path, default_branch, remote_url, created_at, updated_at';
+const COLUMNS = 'id, name, repo_path, default_branch, remote_url, kind, created_at, updated_at';
 
 export class ProjectRepository {
   constructor(private readonly db: Queryable) {}
 
-  async create(input: { name: string; repoPath: string; defaultBranch?: string; remoteUrl?: string | null }): Promise<Project> {
+  async create(input: {
+    name: string;
+    repoPath: string;
+    defaultBranch?: string;
+    remoteUrl?: string | null;
+    kind?: ProjectKind;
+  }): Promise<Project> {
     const row = await this.db.queryOne(
-      `INSERT INTO projects (id, name, repo_path, default_branch, remote_url)
-       VALUES ($1, $2, $3, $4, $5) RETURNING ${COLUMNS}`,
-      [newId(), input.name, input.repoPath, input.defaultBranch ?? 'main', input.remoteUrl ?? null],
+      `INSERT INTO projects (id, name, repo_path, default_branch, remote_url, kind)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${COLUMNS}`,
+      [
+        newId(),
+        input.name,
+        input.repoPath,
+        input.defaultBranch ?? 'main',
+        input.remoteUrl ?? null,
+        input.kind ?? 'PROJECT',
+      ],
     );
     return camelize<Project>(row!);
   }
@@ -37,9 +50,21 @@ export class ProjectRepository {
     return row ? camelize<Project>(row) : null;
   }
 
-  /** Returns the single project this installation manages, if it exists. */
+  /**
+   * The repository this installation works on. The installation itself is also
+   * a project, so the primary one is the first that is not an installation.
+   */
   async findPrimary(): Promise<Project | null> {
-    const row = await this.db.queryOne(`SELECT ${COLUMNS} FROM projects ORDER BY created_at ASC LIMIT 1`);
+    const row = await this.db.queryOne(
+      `SELECT ${COLUMNS} FROM projects WHERE kind = 'PROJECT' ORDER BY created_at ASC LIMIT 1`,
+    );
+    return row ? camelize<Project>(row) : null;
+  }
+
+  async findInstallation(): Promise<Project | null> {
+    const row = await this.db.queryOne(
+      `SELECT ${COLUMNS} FROM projects WHERE kind = 'INSTALLATION' ORDER BY created_at ASC LIMIT 1`,
+    );
     return row ? camelize<Project>(row) : null;
   }
 

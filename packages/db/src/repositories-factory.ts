@@ -7,6 +7,7 @@ import {
   ConflictRepository,
   GitChangeRepository,
   ImpactRepository,
+  InstallationApplyRepository,
   InvariantRepository,
   KnowledgeRepository,
   LockRepository,
@@ -49,6 +50,7 @@ export interface Repositories {
   locks: LockRepository;
   dependencies: TaskDependencyRepository;
   gitChanges: GitChangeRepository;
+  installationApplies: InstallationApplyRepository;
 }
 
 /**
@@ -80,5 +82,6 @@ export function createRepositories(db: Queryable): Repositories {
     locks: new LockRepository(db),
     dependencies: new TaskDependencyRepository(db),
     gitChanges: new GitChangeRepository(db),
+    installationApplies: new InstallationApplyRepository(db),
   };
 }

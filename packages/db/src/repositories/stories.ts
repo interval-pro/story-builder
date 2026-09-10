@@ -3,7 +3,7 @@ import type { Story, StoryRevision } from '@ai-engine/domain';
 import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
 
-const STORY_COLUMNS = 'id, project_id, title, kind, current_revision, created_at, updated_at';
+const STORY_COLUMNS = 'id, project_id, title, current_revision, created_at, updated_at';
 const REVISION_COLUMNS = 'id, story_id, revision, body, created_by, created_at';
 
 export interface StoryWithRevision extends Story {
@@ -18,13 +18,12 @@ export class StoryRepository {
     projectId: string;
     title: string;
     body: string;
-    kind?: 'PROJECT_TASK' | 'SYSTEM_TASK';
     createdBy?: string;
   }): Promise<{ story: Story; revision: StoryRevision }> {
     const storyRow = await this.db.queryOne(
-      `INSERT INTO stories (id, project_id, title, kind, current_revision)
-       VALUES ($1, $2, $3, $4, 1) RETURNING ${STORY_COLUMNS}`,
-      [newId(), input.projectId, input.title, input.kind ?? 'PROJECT_TASK'],
+      `INSERT INTO stories (id, project_id, title, current_revision)
+       VALUES ($1, $2, $3, 1) RETURNING ${STORY_COLUMNS}`,
+      [newId(), input.projectId, input.title],
     );
     const story = camelize<Story>(storyRow!);
     const revisionRow = await this.db.queryOne(

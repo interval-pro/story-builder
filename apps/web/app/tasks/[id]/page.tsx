@@ -1,15 +1,27 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { api, type ReviewNote, type ReviewVersion, type SectionDiff, type Task } from '../../../lib/api';
+import { api, type Project, type ReviewNote, type ReviewVersion, type SectionDiff, type Task } from '../../../lib/api';
 import { RiskBadge, StateBadge } from '../../../components/state-badge';
 import { ReviewView } from '../../../components/review-view';
 import { ExecutionView } from '../../../components/execution-view';
 import { FinalReportView } from '../../../components/final-report-view';
 
+interface InstallationApply {
+  id: string;
+  status: 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'ROLLED_BACK';
+  step: string;
+  log: string;
+  candidateRef: string;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
 interface TaskDetail {
   task: Task;
+  project: Project;
+  applies: InstallationApply[];
   story: { id: string; title: string };
   revision: { revision: number; body: string };
   runs: { id: string; phase: string; agentType: string; status: string; startedAt: string; finishedAt: string | null }[];
@@ -33,12 +45,15 @@ type Tab = 'review' | 'execution' | 'final';
 
 export default function TaskPage() {
   const params = useParams<{ id: string }>();
+  const applyingRef = useRef(false);
   const taskId = params.id;
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [review, setReview] = useState<ReviewPayload | null>(null);
   const [tab, setTab] = useState<Tab>('review');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [unreachable, setUnreachable] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -49,16 +64,32 @@ export default function TaskPage() {
       setDetail(detailResult);
       setReview(reviewResult);
       setError(null);
+      setUnreachable(false);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : String(loadError));
+      // While a candidate is being applied the API is deliberately down, so a
+      // failed poll is expected rather than an error worth showing.
+      if (applyingRef.current) setUnreachable(true);
+      else setError(loadError instanceof Error ? loadError.message : String(loadError));
     }
   }, [taskId]);
+
+  useEffect(() => {
+    applyingRef.current = applying;
+  }, [applying]);
 
   useEffect(() => {
     void load();
     const timer = setInterval(() => void load(), 4000);
     return () => clearInterval(timer);
   }, [load]);
+
+  // The apply is finished when the API answers again and the record is no
+  // longer running. Until then the page simply keeps trying.
+  useEffect(() => {
+    if (!applying || !detail) return;
+    const latest = detail.applies[0];
+    if (latest && latest.status !== 'RUNNING') setApplying(false);
+  }, [applying, detail]);
 
   useEffect(() => {
     if (!detail) return;
@@ -68,6 +99,24 @@ export default function TaskPage() {
       setTab('execution');
     }
   }, [detail?.task.state]);
+
+  async function applyCandidate() {
+    const confirmed = window.confirm(
+      'Applying stops the whole system: the cockpit, the API, the orchestrator and the worker.\n\n' +
+        'It then merges this task, rebuilds, migrates, runs the tests and starts everything again. ' +
+        'This takes a few minutes and the page will be unreachable while it happens.\n\n' +
+        'If anything fails the previous version is restored automatically.\n\nApply it now?',
+    );
+    if (!confirmed) return;
+    setApplying(true);
+    setUnreachable(false);
+    try {
+      await api.post(`/api/tasks/${taskId}/apply`, {});
+    } catch (applyError) {
+      setApplying(false);
+      setError(applyError instanceof Error ? applyError.message : String(applyError));
+    }
+  }
 
   async function act(path: string) {
     setBusy(true);
@@ -83,6 +132,9 @@ export default function TaskPage() {
 
   if (error && !detail) return <p className="error">{error}</p>;
   if (!detail) return <p className="empty">Loading...</p>;
+
+  const latestApply = detail.applies[0] ?? null;
+  const activeElsewhere = Boolean(detail.activeJob);
 
   const { task } = detail;
   const canAnnotate = task.state === 'REVIEW_READY';
@@ -136,6 +188,44 @@ export default function TaskPage() {
           <button disabled={busy} onClick={() => void act('high-risk/confirm')}>
             Confirm execution
           </button>
+        </div>
+      ) : null}
+
+      {detail.project.kind === 'INSTALLATION' && task.state === 'COMPLETED' ? (
+        <div className="card" style={{ borderColor: 'var(--amber)' }}>
+          <strong>Ready to apply to the engine</strong>
+          <p>
+            This work is on branch {task.branchName} inside the installation. Nothing was pushed anywhere. Applying it
+            stops every service, merges, rebuilds, migrates, runs the tests and starts everything again.
+          </p>
+          {latestApply?.status === 'RUNNING' || applying ? (
+            <>
+              <p className="meta">
+                {unreachable
+                  ? 'The system is restarting. This page will come back on its own.'
+                  : `Applying: ${latestApply?.step ?? 'starting'}`}
+              </p>
+              <button disabled>Applying...</button>
+            </>
+          ) : (
+            <>
+              {latestApply?.status === 'ROLLED_BACK' || latestApply?.status === 'FAILED' ? (
+                <p className="error">
+                  The last attempt did not finish and the previous version was restored. Reason:{' '}
+                  {latestApply.log.trim().split('\n').slice(-1)[0]}
+                </p>
+              ) : null}
+              {latestApply?.status === 'SUCCEEDED' ? (
+                <p className="meta">Applied at {new Date(latestApply.finishedAt ?? '').toLocaleString()}.</p>
+              ) : null}
+              <button disabled={busy || activeElsewhere} onClick={() => void applyCandidate()}>
+                Apply to the engine and restart
+              </button>
+              {activeElsewhere ? (
+                <p className="meta">Other tasks are still running. Applying waits until nothing is in flight.</p>
+              ) : null}
+            </>
+          )}
         </div>
       ) : null}
 

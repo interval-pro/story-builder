@@ -1,6 +1,7 @@
 import { indent } from '@ai-engine/shared';
 import type {
   Invariant,
+  ProjectKind,
   Principle,
   ReviewDocument,
   ReviewNote,
@@ -12,6 +13,7 @@ import type {
 import { renderReviewMarkdown } from '@ai-engine/domain';
 
 export interface ProjectContext {
+  kind: ProjectKind;
   principles: Principle[];
   invariants: Invariant[];
   runtimeManifest: RuntimeManifestDocument | null;
@@ -21,6 +23,18 @@ export interface ProjectContext {
 /** Renders the Project Brain so every agent works from the same shared memory. */
 export function renderProjectContext(context: ProjectContext): string {
   const parts: string[] = [];
+
+  if (context.kind === 'INSTALLATION') {
+    parts.push(
+      [
+        '## What this repository is',
+        '',
+        'This repository is the AI engineering system itself, installed as the engine that runs',
+        'these tasks. Work here changes how the system behaves for the project it serves. It is',
+        'applied locally and the engine is restarted onto it; nothing is pushed anywhere.',
+      ].join('\n'),
+    );
+  }
 
   if (context.principles.length > 0) {
     const grouped = new Map<string, Principle[]>();
@@ -66,7 +80,6 @@ export function renderStoryContext(story: Story, revision: StoryRevision, task: 
     '',
     `Title: ${story.title}`,
     `Revision: ${revision.revision}`,
-    `Task kind: ${task.kind === 'SYSTEM_TASK' ? 'system task (may change the AI engineering system itself)' : 'project task'}`,
     `Base branch: ${task.baseBranch}`,
     `Base commit: ${task.baseCommit}`,
     '',

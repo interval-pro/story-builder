@@ -43,6 +43,9 @@ export const EVENT_TYPES = [
   'InvariantExtracted',
   'KnowledgeSnapshotCreated',
   'RuntimeManifestGenerated',
+  'InstallationCandidateReady',
+  'InstallationApplyStarted',
+  'InstallationApplyFinished',
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];

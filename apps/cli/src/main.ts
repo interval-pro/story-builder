@@ -47,7 +47,7 @@ function usage(): void {
   ai-engine start                                  Start the stack with docker compose
   ai-engine stop                                   Stop the stack
   ai-engine status                                 Show system and task status
-  ai-engine story create --body "..." [--title t] [--system]
+  ai-engine story create --body "..." [--title t] [--installation]
   ai-engine task list
   ai-engine task show <taskId>
   ai-engine export <file>                          Export the portable project state
@@ -83,7 +83,7 @@ async function main(): Promise<number> {
         ...(typeof flags['body'] === 'string' ? { body: flags['body'] } : {}),
         ...(typeof flags['file'] === 'string' ? { file: flags['file'] } : {}),
         ...(typeof flags['title'] === 'string' ? { title: flags['title'] } : {}),
-        kind: flags['system'] ? 'SYSTEM_TASK' : 'PROJECT_TASK',
+        installation: Boolean(flags['installation']),
       });
     }
     case 'task': {

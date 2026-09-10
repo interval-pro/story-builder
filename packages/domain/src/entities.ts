@@ -5,12 +5,21 @@ import type { ReviewDocument } from './review';
 import type { RiskLevel } from './risk';
 import type { TaskState } from './task-state';
 
+/**
+ * A repository the system works on, or the installation of the system itself.
+ * An installation never pushes: its work is applied locally and the engine is
+ * restarted onto it.
+ */
+export type ProjectKind = 'PROJECT' | 'INSTALLATION';
+
 export interface Project {
   id: string;
   name: string;
   repoPath: string;
   defaultBranch: string;
   remoteUrl: string | null;
+  /** An installation is the engine itself, registered so stories can change it. */
+  kind: ProjectKind;
   createdAt: string;
   updatedAt: string;
 }
@@ -19,7 +28,6 @@ export interface Story {
   id: string;
   projectId: string;
   title: string;
-  kind: 'PROJECT_TASK' | 'SYSTEM_TASK';
   currentRevision: number;
   createdAt: string;
   updatedAt: string;
@@ -41,7 +49,6 @@ export interface Task {
   storyRevisionId: string;
   state: TaskState;
   previousState: TaskState | null;
-  kind: 'PROJECT_TASK' | 'SYSTEM_TASK';
   branchName: string;
   baseBranch: string;
   baseCommit: string;
@@ -382,4 +389,18 @@ export interface Metric {
   value: number;
   labels: Record<string, string>;
   createdAt: string;
+}
+
+export interface InstallationApply {
+  id: string;
+  projectId: string;
+  taskId: string | null;
+  source: 'TASK' | 'UPSTREAM';
+  candidateRef: string;
+  previousCommit: string;
+  status: 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'ROLLED_BACK';
+  step: string;
+  log: string;
+  startedAt: string;
+  finishedAt: string | null;
 }

@@ -64,7 +64,16 @@ fi
 # stopping it actually stops the server rather than an empty parent.
 start web sh -c "cd apps/web && NEXT_PUBLIC_API_BASE_URL='${API_BASE_URL:-http://localhost:4000}' exec npx next start -p 3000"
 
-until curl -sf "${API_BASE_URL:-http://localhost:4000}/api/health" >/dev/null 2>&1; do sleep 1; done
+# Bounded, because an apply runs this unattended and must not hang forever on
+# a version that cannot start.
+for _ in $(seq 1 120); do
+  curl -sf "${API_BASE_URL:-http://localhost:4000}/api/health" >/dev/null 2>&1 && break
+  sleep 1
+done
+if ! curl -sf "${API_BASE_URL:-http://localhost:4000}/api/health" >/dev/null 2>&1; then
+  echo "The API did not come up within two minutes. See .run/api.log." >&2
+  exit 1
+fi
 
 echo
 echo "Project:  $PROJECT_ROOT"

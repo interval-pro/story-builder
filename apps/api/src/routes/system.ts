@@ -46,6 +46,17 @@ export function registerSystemRoutes(router: HttpRouter, context: ApiContext): v
     };
   });
 
+  router.get('/api/projects', async () => ({ projects: await context.repos.projects.list() }));
+
+  router.get('/api/system/apply', async () => {
+    const installation = await context.repos.projects.findInstallation();
+    if (!installation) return { installation: null, apply: null };
+    return {
+      installation,
+      apply: await context.repos.installationApplies.latest(installation.id),
+    };
+  });
+
   router.get('/api/system/status', async ({ query }) => {
     const projectId = await primaryProjectId(context, query.get('projectId'));
     const project = await context.repos.projects.getById(projectId);

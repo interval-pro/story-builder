@@ -38,14 +38,22 @@ export interface Task {
   blockedReason: string | null;
   failureReason: string | null;
   baseMoved: boolean;
-  kind: string;
+  projectId: string;
   createdAt: string;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  repoPath: string;
+  defaultBranch: string;
+  remoteUrl: string | null;
+  kind: 'PROJECT' | 'INSTALLATION';
 }
 
 export interface Story {
   id: string;
   title: string;
-  kind: string;
   currentRevision: number;
   createdAt: string;
   tasks: Task[];

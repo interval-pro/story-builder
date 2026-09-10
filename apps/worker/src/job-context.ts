@@ -87,6 +87,7 @@ export async function buildProjectContext(context: JobContext): Promise<ProjectC
   }
 
   return {
+    kind: context.project.kind,
     principles,
     invariants,
     runtimeManifest: manifest?.manifest ?? null,

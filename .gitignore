@@ -9,3 +9,4 @@ coverage/
 .artifacts/
 .DS_Store
 .run/
+.ai-engineering/installation.json

@@ -16,7 +16,7 @@ export function registerStoryRoutes(router: HttpRouter, context: ApiContext): vo
   });
 
   router.post('/api/stories', async ({ body, headers }) => {
-    const input = requireBody<{ body: string; title?: string; kind?: 'PROJECT_TASK' | 'SYSTEM_TASK'; projectId?: string; startAnalysis?: boolean }>(
+    const input = requireBody<{ body: string; title?: string; projectId?: string; startAnalysis?: boolean }>(
       body,
       ['body'],
     );
@@ -28,7 +28,6 @@ export function registerStoryRoutes(router: HttpRouter, context: ApiContext): vo
       projectId,
       body: input.body,
       ...(input.title ? { title: input.title } : {}),
-      kind: input.kind ?? 'PROJECT_TASK',
       actor: actorFrom(headers as Record<string, unknown>),
       startAnalysis: input.startAnalysis ?? true,
     });

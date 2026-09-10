@@ -115,6 +115,27 @@ export async function handlePushAndPullRequest(context: JobContext): Promise<voi
   const headCommit = await git.headCommit();
   await context.repos.gitChanges.recordRef(context.task.id, context.task.branchName, headCommit, 'task_head');
 
+  // An installation is never pushed. Its work waits on a local branch until a
+  // human applies it, which stops the services, rebuilds and restarts onto it.
+  if (context.project.kind === 'INSTALLATION') {
+    await context.events.append({
+      projectId: context.project.id,
+      taskId: context.task.id,
+      eventType: 'InstallationCandidateReady',
+      actorType: 'worker',
+      actorId: context.workerId,
+      payload: { candidateRef: context.task.branchName, commit: headCommit },
+    });
+    await context.orchestrator.transition({
+      taskId: context.task.id,
+      to: 'COMPLETED',
+      actor: { type: 'worker', id: context.workerId },
+      reason: 'ready to be applied to the installation',
+      enqueue: { jobType: 'LEARNING' },
+    });
+    return;
+  }
+
   const provider = createRemoteProvider(context.project.remoteUrl);
   if (!provider || !provider.isConfigured()) {
     // Without a configured remote the task still completes; the branch is local.

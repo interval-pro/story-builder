@@ -1,7 +1,7 @@
 # Installation topology: the layer lives outside the project it serves
 
 Date: 2026-09-10
-Status: approved, stage 1
+Status: stage 1 shipped in v0.1.1, stage 2 implemented
 
 ## Problem
 
@@ -58,13 +58,27 @@ upstream release is the expected, visible outcome of the second kind.
    in: up to date, behind, diverged. Local commits or a dirty tree mean
    diverged. Exposed on the CLI, the API and the cockpit.
 
-## Deferred to stage 2
+## Stage 2
 
-- Registering the installation as a second project and removing `task.kind`
-  entirely, so stories target a project rather than carry a kind.
-- Building a candidate version side by side, running migrations and self tests,
-  switching the pointer and restarting.
-- Syncing with upstream as a normal Git merge, with conflicts surfaced as work.
+1. **The installation is a project.** `init` registers it alongside the
+   repository being worked on, with `projects.kind` telling them apart. The kind
+   carried by stories and tasks is dropped: a story targets a project, and the
+   cockpit picks which one.
+2. **An installation never pushes.** Its finished work waits on a local branch
+   in the installation instead of becoming a pull request.
+3. **Applying is a button, not an automatic step.** The engine must not swap
+   itself out from under a running task, so a human decides when. The API only
+   validates and hands the work to a detached process, because the API itself is
+   stopped moments later. Progress is written to Postgres, which stays up, and
+   the cockpit reads the outcome once the system answers again. Any failure
+   restores the previous commit, rebuilds and restarts.
+4. **The installation lives on a real branch.** Cloning a tag leaves a detached
+   HEAD, which has nothing to merge into.
+
+## Deferred
+
+- Syncing with upstream as a normal Git merge, reusing the same apply path with
+  a release as the candidate instead of a task branch.
 - A remote URL as an alternative project input, with the engine owning the clone.
 
 ## Consequences

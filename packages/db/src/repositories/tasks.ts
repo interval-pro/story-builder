@@ -3,7 +3,7 @@ import type { RiskLevel, Task, TaskState } from '@ai-engine/domain';
 import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
 
-const COLUMNS = `id, project_id, story_id, story_revision_id, state, previous_state, kind, branch_name,
+const COLUMNS = `id, project_id, story_id, story_revision_id, state, previous_state, branch_name,
   base_branch, base_commit, knowledge_snapshot_id, risk_level, qa_iteration, base_moved,
   blocked_reason, failure_reason, created_at, updated_at`;
 
@@ -17,12 +17,11 @@ export class TaskRepository {
     branchName: string;
     baseBranch: string;
     baseCommit: string;
-    kind?: 'PROJECT_TASK' | 'SYSTEM_TASK';
     knowledgeSnapshotId?: string | null;
   }): Promise<Task> {
     const row = await this.db.queryOne(
-      `INSERT INTO tasks (id, project_id, story_id, story_revision_id, branch_name, base_branch, base_commit, kind, knowledge_snapshot_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING ${COLUMNS}`,
+      `INSERT INTO tasks (id, project_id, story_id, story_revision_id, branch_name, base_branch, base_commit, knowledge_snapshot_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING ${COLUMNS}`,
       [
         newId(),
         input.projectId,
@@ -31,7 +30,6 @@ export class TaskRepository {
         input.branchName,
         input.baseBranch,
         input.baseCommit,
-        input.kind ?? 'PROJECT_TASK',
         input.knowledgeSnapshotId ?? null,
       ],
     );

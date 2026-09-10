@@ -85,6 +85,12 @@ mkdir -p "$(dirname "$INSTALL_DIR")"
 git clone --quiet --branch "$REF" "$SOURCE_URL" "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
+# Cloning a tag leaves a detached HEAD, and an installation needs a real branch:
+# work against it is merged into that branch and the engine is restarted onto it.
+if ! git symbolic-ref -q HEAD >/dev/null; then
+  git checkout --quiet -b installation
+fi
+
 # A local clone inherits the local path as its origin. The upstream is what the
 # version check compares against, so point origin back at the real repository.
 if [ -d "$SOURCE_URL" ]; then

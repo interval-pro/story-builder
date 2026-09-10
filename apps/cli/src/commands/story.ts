@@ -3,12 +3,12 @@ import { Database, createRepositories } from '@ai-engine/db';
 import { TaskCommands } from '@ai-engine/orchestrator';
 import { failure, heading, info, success, table } from '../output';
 
-/** Creates a story from the command line, for scripting and for system stories. */
+/** Creates a story from the command line, against the project or the installation. */
 export async function storyCreateCommand(options: {
   body?: string;
   file?: string;
   title?: string;
-  kind: 'PROJECT_TASK' | 'SYSTEM_TASK';
+  installation?: boolean;
 }): Promise<number> {
   const db = new Database();
   try {
@@ -18,9 +18,15 @@ export async function storyCreateCommand(options: {
       return 1;
     }
     const repos = createRepositories(db);
-    const project = await repos.projects.findPrimary();
+    const project = options.installation
+      ? await repos.projects.findInstallation()
+      : await repos.projects.findPrimary();
     if (!project) {
-      failure('No project is registered. Run "ai-engine init" first.');
+      failure(
+        options.installation
+          ? 'This installation is not registered as a project. Run "ai-engine init" again.'
+          : 'No project is registered. Run "ai-engine init" first.',
+      );
       return 1;
     }
     const commands = new TaskCommands(db);
@@ -28,11 +34,11 @@ export async function storyCreateCommand(options: {
       projectId: project.id,
       body,
       ...(options.title ? { title: options.title } : {}),
-      kind: options.kind,
       actor: { type: 'human', id: 'cli' },
     });
     heading('Story created');
     table([
+      ['Target', `${project.name} (${project.kind === 'INSTALLATION' ? 'installation' : 'project'})`],
       ['Story', result.story.id],
       ['Task', result.task.id],
       ['Branch', result.task.branchName],

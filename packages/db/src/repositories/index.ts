@@ -9,3 +9,4 @@ export * from './execution';
 export * from './brain';
 export * from './knowledge';
 export * from './coordination';
+export * from './installation';
