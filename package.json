@@ -2,7 +2,7 @@
   "name": "ai-engineering-system",
   "version": "0.1.0",
   "private": true,
-  "description": "AI Engineering System — an engineering process in which AI participates as multiple engineers.",
+  "description": "AI Engineering System \u2014 an engineering process in which AI participates as multiple engineers.",
   "license": "MIT",
   "workspaces": [
     "packages/*",
@@ -17,7 +17,7 @@
     "typecheck": "tsc -b tsconfig.build.json --pretty",
     "test": "node --import ./scripts/register-source.mjs --test \"packages/*/test/*.test.ts\"",
     "lint": "eslint . --ext .ts,.tsx",
-    "migrate": "node -r ./scripts/register.js packages/db/src/cli/migrate.ts",
+    "migrate": "node packages/db/dist/cli/migrate.js",
     "db:reset": "npm run migrate -- --reset",
     "dev:api": "tsx watch apps/api/src/main.ts",
     "dev:orchestrator": "tsx watch apps/orchestrator/src/main.ts",

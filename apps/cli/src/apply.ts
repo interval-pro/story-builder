@@ -122,8 +122,11 @@ async function main(): Promise<number> {
       return 1;
     }
 
+    // The compiled migrator, not the npm script: the build has just run, and
+    // the script exists for developing against sources rather than for a
+    // release being applied.
     await log('migrating');
-    const migrate = await run('npm', ['run', 'migrate'], installRoot);
+    const migrate = await run(process.execPath, ['packages/db/dist/cli/migrate.js'], installRoot);
     if (!migrate.ok) {
       await rollback(`migration failed: ${migrate.output.slice(-4000)}`);
       return 1;
