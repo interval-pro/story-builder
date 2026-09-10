@@ -57,11 +57,43 @@ start api node apps/api/dist/main.js
 start orchestrator node apps/orchestrator/dist/main.js
 start worker node apps/worker/dist/main.js
 
-# A failed build leaves the .next directory behind without a BUILD_ID, so the
-# marker is what tells us whether there is something worth starting.
-if [ ! -f apps/web/.next/BUILD_ID ]; then
+WEB_STAMP="$ROOT/.run/web-build.stamp"
+# 1 is the only answer that means skip. A needless build costs a minute; a
+# skipped one serves the cockpit from before the update. The lockfile and the
+# env file count as sources: dependencies hoist to the root, and API_BASE_URL
+# is inlined into the bundle at build time.
+# Run through bash rather than as a command: a checkout that loses the
+# executable bit would otherwise fail with exit 126 on every start, and since
+# anything but 1 means rebuild, that reads as "always stale" and quietly
+# rebuilds the cockpit every time.
+web_state=0
+bash "$ROOT/scripts/web-build-stale.sh" "$ROOT/apps/web" "$WEB_STAMP" \
+  "$ROOT/package-lock.json" "$ROOT/$ENV_FILE" >/dev/null || web_state=$?
+if [ "$web_state" -ne 1 ]; then
+  # Rebuilding under a live server would swap the bundle out from under it.
+  # Recorded pid first, then the port, because the Next server renames its own
+  # process and dev-down.sh already learned not to trust the pid alone.
+  web_pid=""
+  if [ -f .run/web.pid ] && kill -0 "$(cat .run/web.pid)" 2>/dev/null; then
+    web_pid="$(cat .run/web.pid)"
+  fi
+  port_pid="$(lsof -nP -iTCP:3000 -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
+  if [ -n "$web_pid" ] || [ -n "$port_pid" ]; then
+    echo "-> Stopping the cockpit to rebuild it"
+    [ -n "$web_pid" ] && kill "$web_pid" 2>/dev/null || true
+    [ -n "$port_pid" ] && kill "$port_pid" 2>/dev/null || true
+  fi
+  rm -f .run/web.pid
   echo "-> Building the cockpit"
-  ( cd apps/web && ulimit -n 8192 && NEXT_PUBLIC_API_BASE_URL="${API_BASE_URL:-http://localhost:4000}" npx next build >/dev/null )
+  if ! ( cd apps/web && ulimit -n 8192 \
+      && NEXT_PUBLIC_API_BASE_URL="${API_BASE_URL:-http://localhost:4000}" npx next build ) \
+      > "$ROOT/.run/web-build.log" 2>&1; then
+    echo "The cockpit build failed. See .run/web-build.log." >&2
+    exit 1
+  fi
+  # Only now. The stamp records a build that finished, so a failure leaves the
+  # next start to try again.
+  touch "$WEB_STAMP"
 fi
 # exec replaces the wrapper shell, so the recorded pid is the server itself and
 # stopping it actually stops the server rather than an empty parent.
