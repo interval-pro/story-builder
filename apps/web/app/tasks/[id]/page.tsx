@@ -131,7 +131,7 @@ export default function TaskPage() {
   }
 
   if (error && !detail) return <p className="error">{error}</p>;
-  if (!detail) return <p className="empty">Loading...</p>;
+  if (!detail) return <p className="empty">Reading this task and its engineering review.</p>;
 
   const latestApply = detail.applies[0] ?? null;
   const activeElsewhere = Boolean(detail.activeJob);
@@ -144,7 +144,7 @@ export default function TaskPage() {
       <div className="card-row">
         <div>
           <h2>{detail.story.title}</h2>
-          <div className="meta">
+          <div className="card-detail">
             revision {detail.revision.revision} · branch {task.branchName} · base {task.baseBranch} @{' '}
             {task.baseCommit.slice(0, 10)}
             {task.baseMoved ? ' · base moved' : ''}
@@ -152,17 +152,17 @@ export default function TaskPage() {
         </div>
         <div className="row">
           <RiskBadge level={task.riskLevel} />
-          <StateBadge state={task.state} />
+          <StateBadge state={task.state} prominent />
         </div>
       </div>
 
       {error ? <p className="error">{error}</p> : null}
 
       {task.blockedReason ? (
-        <div className="card" style={{ borderColor: 'var(--amber)' }}>
-          <strong>Blocked</strong>
+        <div className="card warning">
+          <div className="card-value">Blocked</div>
           <p>{task.blockedReason}</p>
-          <div className="row">
+          <div className="actions">
             <button className="secondary" disabled={busy} onClick={() => void act('unblock')}>
               Send back to implementation
             </button>
@@ -171,41 +171,47 @@ export default function TaskPage() {
       ) : null}
 
       {task.state === 'FAILED' ? (
-        <div className="card" style={{ borderColor: 'var(--red)' }}>
-          <strong>This task failed</strong>
+        <div className="card critical">
+          <div className="card-value">This task failed</div>
           <p>{task.failureReason ?? 'No reason was recorded.'}</p>
-          <p className="meta">Retrying continues from what already completed rather than starting over.</p>
-          <button disabled={busy} onClick={() => void act('retry')}>
-            Retry
-          </button>
+          <p className="card-detail">Retrying continues from what already completed rather than starting over.</p>
+          <div className="actions">
+            <button disabled={busy} onClick={() => void act('retry')}>
+              Retry
+            </button>
+          </div>
         </div>
       ) : null}
 
       {task.state === 'HIGH_RISK_CONFIRMATION_REQUIRED' ? (
-        <div className="card" style={{ borderColor: 'var(--amber)' }}>
-          <strong>This change is high risk</strong>
+        <div className="card warning">
+          <div className="card-value">This change is high risk</div>
           <p>The approved review needs a second, explicit execution approval before any code is written.</p>
-          <button disabled={busy} onClick={() => void act('high-risk/confirm')}>
-            Confirm execution
-          </button>
+          <div className="actions">
+            <button disabled={busy} onClick={() => void act('high-risk/confirm')}>
+              Confirm execution
+            </button>
+          </div>
         </div>
       ) : null}
 
       {detail.project.kind === 'INSTALLATION' && task.state === 'COMPLETED' ? (
-        <div className="card" style={{ borderColor: 'var(--amber)' }}>
-          <strong>Ready to apply to the engine</strong>
+        <div className="card warning">
+          <div className="card-value">Ready to apply to the engine</div>
           <p>
             This work is on branch {task.branchName} inside the installation. Nothing was pushed anywhere. Applying it
             stops every service, merges, rebuilds, migrates, runs the tests and starts everything again.
           </p>
           {latestApply?.status === 'RUNNING' || applying ? (
             <>
-              <p className="meta">
+              <p className="card-detail">
                 {unreachable
                   ? 'The system is restarting. This page will come back on its own.'
                   : `Applying: ${latestApply?.step ?? 'starting'}`}
               </p>
-              <button disabled>Applying...</button>
+              <div className="actions">
+                <button disabled>Applying...</button>
+              </div>
             </>
           ) : (
             <>
@@ -216,13 +222,15 @@ export default function TaskPage() {
                 </p>
               ) : null}
               {latestApply?.status === 'SUCCEEDED' ? (
-                <p className="meta">Applied at {new Date(latestApply.finishedAt ?? '').toLocaleString()}.</p>
+                <p className="card-detail">Applied at {new Date(latestApply.finishedAt ?? '').toLocaleString()}.</p>
               ) : null}
-              <button disabled={busy || activeElsewhere} onClick={() => void applyCandidate()}>
-                Apply to the engine and restart
-              </button>
+              <div className="actions">
+                <button disabled={busy || activeElsewhere} onClick={() => void applyCandidate()}>
+                  Apply to the engine and restart
+                </button>
+              </div>
               {activeElsewhere ? (
-                <p className="meta">Other tasks are still running. Applying waits until nothing is in flight.</p>
+                <p className="card-detail">Other tasks are still running. Applying waits until nothing is in flight.</p>
               ) : null}
             </>
           )}
@@ -262,7 +270,7 @@ export default function TaskPage() {
       {tab === 'final' ? <FinalReportView taskId={taskId} task={task} onChanged={() => void load()} /> : null}
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Story</h3>
+        <h3>Story</h3>
         <div className="section-body">{detail.revision.body}</div>
       </div>
     </div>

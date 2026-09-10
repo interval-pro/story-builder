@@ -63,11 +63,7 @@ export default function BrainPage() {
 
       <div className="card">
         <div className="row">
-          <select
-            value={category}
-            onChange={(event) => setCategory(event.target.value)}
-            style={{ background: 'var(--panel-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px' }}
-          >
+          <select value={category} onChange={(event) => setCategory(event.target.value)}>
             {['architecture', 'code_style', 'testing', 'data_access', 'error_handling', 'security', 'performance', 'api_design', 'dependencies', 'deployment', 'domain_design', 'general'].map((option) => (
               <option key={option} value={option}>
                 {option}
@@ -79,7 +75,7 @@ export default function BrainPage() {
             value={statement}
             placeholder="Prefer extending an existing domain responsibility over introducing another component."
             onChange={(event) => setStatement(event.target.value)}
-            style={{ flex: 1 }}
+            className="grow"
           />
           <button onClick={() => void addPrinciple()} disabled={statement.trim().length < 10}>
             Add
@@ -91,58 +87,62 @@ export default function BrainPage() {
       {active.length === 0 ? (
         <p className="empty">Nothing learned yet. Principles appear as you correct reviews.</p>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th style={{ width: 150 }}>Category</th>
-              <th>Statement</th>
-              <th style={{ width: 110 }}>Evidence</th>
-              <th style={{ width: 80 }} />
-            </tr>
-          </thead>
-          <tbody>
-            {active.map((principle) => (
-              <tr key={principle.id}>
-                <td>{principle.category}</td>
-                <td>{principle.statement}</td>
-                <td className="meta">
-                  {principle.evidenceCount}x · strength {principle.strength.toFixed(2)}
-                </td>
-                <td>
-                  <button className="secondary" onClick={() => void retire(principle.id)}>
-                    Retire
-                  </button>
-                </td>
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th className="col-md">Category</th>
+                <th>Statement</th>
+                <th className="col-sm">Evidence</th>
+                <th className="col-xs" />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {active.map((principle) => (
+                <tr key={principle.id}>
+                  <td>{principle.category}</td>
+                  <td>{principle.statement}</td>
+                  <td className="meta">
+                    {principle.evidenceCount}x · strength {principle.strength.toFixed(2)}
+                  </td>
+                  <td>
+                    <button className="secondary" onClick={() => void retire(principle.id)}>
+                      Retire
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <h3>Invariants ({invariants.length})</h3>
       {invariants.length === 0 ? (
         <p className="empty">No invariants have been extracted yet.</p>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Statement</th>
-              <th style={{ width: 120 }}>Scope</th>
-              <th style={{ width: 120 }}>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {invariants.map((invariant) => (
-              <tr key={invariant.id}>
-                <td>{invariant.statement}</td>
-                <td className="meta">{invariant.scope}</td>
-                <td>
-                  <span className={`badge ${invariant.status === 'ACTIVE' ? 'done' : 'waiting'}`}>{invariant.status}</span>
-                </td>
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Statement</th>
+                <th className="col-sm">Scope</th>
+                <th className="col-sm">Status</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {invariants.map((invariant) => (
+                <tr key={invariant.id}>
+                  <td>{invariant.statement}</td>
+                  <td className="meta">{invariant.scope}</td>
+                  <td>
+                    <span className={`badge ${invariant.status === 'ACTIVE' ? 'done' : 'waiting'}`}>{invariant.status}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

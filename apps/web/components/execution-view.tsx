@@ -63,17 +63,16 @@ export function ExecutionView({ taskId, detail, onAction }: Props) {
     <div>
       <div className="card">
         <div className="card-row">
-          <div className="stack">
-            <div>
-              <strong>Current agent:</strong> {currentRun ? `${currentRun.agentType} (${currentRun.phase})` : 'idle'}
-            </div>
-            <div className="meta">
+          <div>
+            <div className="card-label">Current agent</div>
+            <div className="card-value">{currentRun ? `${currentRun.agentType} (${currentRun.phase})` : 'idle'}</div>
+            <div className="card-detail">
               job: {detail.activeJob ? `${detail.activeJob.jobType} · ${detail.activeJob.status} · attempt ${detail.activeJob.attempt}` : 'none'}
             </div>
-            <div className="meta">
+            <div className="card-detail">
               sandbox: {detail.sandbox ? `${detail.sandbox.status} · ${detail.sandbox.mode}` : 'not created'}
             </div>
-            <div className="meta">
+            <div className="card-detail">
               QA iteration {detail.task.qaIteration}
               {detail.task.baseMoved ? ' · the base branch has moved' : ''}
             </div>
@@ -93,29 +92,31 @@ export function ExecutionView({ taskId, detail, onAction }: Props) {
       </div>
 
       {detail.conflicts.length > 0 ? (
-        <div className="card" style={{ borderColor: 'var(--amber)' }}>
-          <h3 style={{ marginTop: 0 }}>Conflicts with other tasks</h3>
-          <table>
-            <tbody>
-              {detail.conflicts.map((conflict) => (
-                <tr key={conflict.id}>
-                  <td style={{ width: 110 }}>{conflict.severity}</td>
-                  <td style={{ width: 220 }}>{conflict.resource}</td>
-                  <td>{conflict.description}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="card warning">
+          <h3>Conflicts with other tasks</h3>
+          <div className="table-scroll">
+            <table>
+              <tbody>
+                {detail.conflicts.map((conflict) => (
+                  <tr key={conflict.id}>
+                    <td className="col-sm">{conflict.severity}</td>
+                    <td className="col-lg">{conflict.resource}</td>
+                    <td>{conflict.description}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : null}
 
       {latestQa ? (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>
+          <h3>
             QA iteration {latestQa.iteration}: {latestQa.verdict}
           </h3>
           {latestQa.findings.length === 0 ? (
-            <p className="meta">No findings.</p>
+            <p className="empty">QA found nothing to fix in this iteration.</p>
           ) : (
             latestQa.findings.map((finding) => (
               <div key={finding.id} className="note">
@@ -131,65 +132,71 @@ export function ExecutionView({ taskId, detail, onAction }: Props) {
       ) : null}
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Tests</h3>
+        <h3>Tests</h3>
         {detail.testRuns.length === 0 ? (
-          <p className="meta">No test runs recorded yet.</p>
+          <p className="empty">No tests have run yet. They start once there is something to check.</p>
         ) : (
-          <table>
-            <tbody>
-              {detail.testRuns.slice(-8).reverse().map((run) => (
-                <tr key={run.id}>
-                  <td style={{ width: 90 }}>
-                    <span className={`badge ${run.passed ? 'done' : 'attention'}`}>{run.passed ? 'passed' : 'failed'}</span>
-                  </td>
-                  <td>{run.command}</td>
-                  <td className="meta" style={{ width: 180 }}>{new Date(run.createdAt).toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table>
+              <tbody>
+                {detail.testRuns.slice(-8).reverse().map((run) => (
+                  <tr key={run.id}>
+                    <td className="col-xs">
+                      <span className={`badge ${run.passed ? 'done' : 'attention'}`}>{run.passed ? 'passed' : 'failed'}</span>
+                    </td>
+                    <td>{run.command}</td>
+                    <td className="meta col-md">{new Date(run.createdAt).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Changed files ({detail.changes.length})</h3>
+        <h3>Changed files ({detail.changes.length})</h3>
         {detail.changes.length === 0 ? (
-          <p className="meta">Nothing has been changed yet.</p>
+          <p className="empty">No files have been touched yet. Changes appear here as the agent writes them.</p>
         ) : (
-          <table>
-            <tbody>
-              {detail.changes.map((change) => (
-                <tr key={change.filePath}>
-                  <td style={{ width: 100 }}>{change.changeType}</td>
-                  <td style={{ width: 110 }} className="meta">
-                    +{change.insertions} -{change.deletions}
-                  </td>
-                  <td>{change.filePath}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table>
+              <tbody>
+                {detail.changes.map((change) => (
+                  <tr key={change.filePath}>
+                    <td className="col-xs">{change.changeType}</td>
+                    <td className="meta col-sm">
+                      +{change.insertions} -{change.deletions}
+                    </td>
+                    <td>{change.filePath}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Latest tool activity</h3>
+        <h3>Latest tool activity</h3>
         {toolCalls.length === 0 ? (
-          <p className="meta">No tool calls yet.</p>
+          <p className="empty">No tools have been called yet. This fills in while an agent is working.</p>
         ) : (
-          <table>
-            <tbody>
-              {toolCalls.map((call) => (
-                <tr key={call.id}>
-                  <td style={{ width: 170 }}>{call.toolName}</td>
-                  <td style={{ width: 80 }}>
-                    <span className={`badge ${call.status === 'OK' ? 'done' : 'attention'}`}>{call.status}</span>
-                  </td>
-                  <td>{call.outputSummary}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table>
+              <tbody>
+                {toolCalls.map((call) => (
+                  <tr key={call.id}>
+                    <td className="col-md">{call.toolName}</td>
+                    <td className="col-xs">
+                      <span className={`badge ${call.status === 'OK' ? 'done' : 'attention'}`}>{call.status}</span>
+                    </td>
+                    <td>{call.outputSummary}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

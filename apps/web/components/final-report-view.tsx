@@ -40,14 +40,16 @@ export function FinalReportView({ taskId, task, onChanged }: { taskId: string; t
         <div className="card">
           <div className="card-row">
             <div>
-              <strong>Ready for your decision</strong>
-              <div className="meta">
+              <div className="card-value">Ready for your decision</div>
+              <div className="card-detail">
                 Approving rebases the branch onto the current base, re-runs the checks and only then pushes.
               </div>
             </div>
-            <button disabled={busy} onClick={() => void approve()}>
-              Approve and create pull request
-            </button>
+            <div className="actions">
+              <button disabled={busy} onClick={() => void approve()}>
+                Approve and create pull request
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

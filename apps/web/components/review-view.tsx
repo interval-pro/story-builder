@@ -72,8 +72,9 @@ export function ReviewView({ taskId, reviewId, version, notes, diff, canAct, onC
       <div className="card">
         <div className="card-row">
           <div>
-            <strong>Engineering review v{version.version}</strong>
-            <div className="meta">{new Date(version.createdAt).toLocaleString()}</div>
+            <div className="card-label">Engineering review</div>
+            <div className="card-value">v{version.version}</div>
+            <div className="card-detail">{new Date(version.createdAt).toLocaleString()}</div>
           </div>
           <div className="row">
             {diff.length > 0 ? (
@@ -93,14 +94,14 @@ export function ReviewView({ taskId, reviewId, version, notes, diff, canAct, onC
             ) : null}
           </div>
         </div>
-        <p style={{ marginBottom: 0 }}>{document_.summary}</p>
+        <p>{document_.summary}</p>
       </div>
 
       {error ? <p className="error">{error}</p> : null}
 
       {selection ? (
         <div className="card">
-          <div className="meta">Selected fragment</div>
+          <div className="card-label">Selected fragment</div>
           <div className="note">
             <div className="anchor">{selection.text.slice(0, 400)}</div>
           </div>
@@ -110,7 +111,7 @@ export function ReviewView({ taskId, reviewId, version, notes, diff, canAct, onC
             placeholder="Do not create another service. Extend the existing NotificationService."
             onChange={(event) => setNoteText(event.target.value)}
           />
-          <div className="row" style={{ marginTop: 8 }}>
+          <div className="actions">
             <button onClick={() => void addNote()} disabled={busy || noteText.trim().length === 0}>
               Add note
             </button>
@@ -129,20 +130,19 @@ export function ReviewView({ taskId, reviewId, version, notes, diff, canAct, onC
           return (
             <div key={section.key} className="card">
               <div className="card-row">
-                <h3 style={{ margin: 0 }}>{section.title}</h3>
+                <h3>{section.title}</h3>
                 {sectionDiff && sectionDiff.status !== 'unchanged' ? (
                   <span className="badge running">{sectionDiff.status}</span>
                 ) : null}
               </div>
               {changed && sectionDiff.before ? (
-                <div style={{ marginTop: 12 }}>
-                  <div className="meta">Previous version</div>
+                <div>
+                  <div className="card-label">Previous version</div>
                   <pre>{sectionDiff.before}</pre>
                 </div>
               ) : null}
               <div
                 className={`section-body selectable ${changed ? 'diff-changed' : ''}`}
-                style={{ marginTop: 12 }}
                 onMouseUp={() => captureSelection(section.key)}
               >
                 {section.body}
@@ -153,7 +153,7 @@ export function ReviewView({ taskId, reviewId, version, notes, diff, canAct, onC
                   <div key={note.id} className="note">
                     <div className="anchor">on: {note.anchorText.slice(0, 200)}</div>
                     <div>{note.note}</div>
-                    <div className="meta">{note.status.toLowerCase()}</div>
+                    <div className="card-detail">{note.status.toLowerCase()}</div>
                   </div>
                 ))}
             </div>
@@ -162,16 +162,16 @@ export function ReviewView({ taskId, reviewId, version, notes, diff, canAct, onC
 
       {document_.implementationSteps.length > 0 ? (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Implementation plan</h3>
+          <h3>Implementation plan</h3>
           <ol>
             {document_.implementationSteps
               .slice()
               .sort((a, b) => a.order - b.order)
               .map((step) => (
-                <li key={step.order} style={{ marginBottom: 8 }}>
+                <li key={step.order}>
                   <strong>{step.title}</strong>
                   <div>{step.detail}</div>
-                  {step.files.length > 0 ? <div className="meta">{step.files.join(', ')}</div> : null}
+                  {step.files.length > 0 ? <div className="card-detail">{step.files.join(', ')}</div> : null}
                 </li>
               ))}
           </ol>
@@ -180,23 +180,25 @@ export function ReviewView({ taskId, reviewId, version, notes, diff, canAct, onC
 
       {document_.riskSignals.length > 0 ? (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Risk signals</h3>
-          <table>
-            <tbody>
-              {document_.riskSignals.map((signal) => (
-                <tr key={signal.indicator + signal.evidence}>
-                  <td style={{ width: 220 }}>{signal.indicator}</td>
-                  <td>{signal.evidence}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <h3>Risk signals</h3>
+          <div className="table-scroll">
+            <table>
+              <tbody>
+                {document_.riskSignals.map((signal) => (
+                  <tr key={signal.indicator + signal.evidence}>
+                    <td className="col-lg">{signal.indicator}</td>
+                    <td>{signal.evidence}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : null}
 
       {notes.filter((note) => !note.sectionKey).length > 0 ? (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Notes</h3>
+          <h3>Notes</h3>
           {notes
             .filter((note) => !note.sectionKey)
             .map((note) => (
