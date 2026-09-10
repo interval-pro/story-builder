@@ -84,6 +84,14 @@ if [ "$web_state" -ne 1 ]; then
     [ -n "$port_pid" ] && kill "$port_pid" 2>/dev/null || true
   fi
   rm -f .run/web.pid
+  # A finished build leaves a traced subset of Next under apps/web/node_modules,
+  # because output: standalone traces relative to the root pinned in
+  # next.config.mjs. The next build then resolves Next from that subset instead
+  # of from the real package at the workspace root and fails on its own missing
+  # files. Nothing installs there, so removing it is safe and it has to go
+  # before every build rather than after: a build that crashes would otherwise
+  # leave it behind.
+  rm -rf apps/web/node_modules
   echo "-> Building the cockpit"
   if ! ( cd apps/web && ulimit -n 8192 \
       && NEXT_PUBLIC_API_BASE_URL="${API_BASE_URL:-http://localhost:4000}" npx next build ) \

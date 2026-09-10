@@ -53,9 +53,8 @@ async function main(): Promise<number> {
     await repos.installationApplies.progress(applyId, step, output ? `[${step}] ${output}` : `[${step}]`);
   };
 
-  const restart = async (): Promise<void> => {
-    await run(path.join(installRoot, 'scripts', 'dev-up.sh'), [], installRoot);
-  };
+  const restart = async (): Promise<StepResult> =>
+    run(path.join(installRoot, 'scripts', 'dev-up.sh'), [], installRoot);
 
   const rollback = async (reason: string): Promise<void> => {
     await log('rolling back', reason);
@@ -139,8 +138,20 @@ async function main(): Promise<number> {
       return 1;
     }
 
+    // The code is already in place and verified by this point, so a start that
+    // fails is not a reason to undo the update. It is a reason to say so: an
+    // apply that reports success while a service is down sends the operator
+    // looking at the wrong thing.
     await log('starting the services');
-    await restart();
+    const started = await restart();
+    if (!started.ok) {
+      await repos.installationApplies.finish(
+        applyId,
+        'FAILED',
+        `[the services did not all come up] ${started.output.slice(-4000)}\n`,
+      );
+      return 1;
+    }
     await repos.installationApplies.finish(applyId, 'SUCCEEDED', '[done]\n');
     return 0;
   } catch (error) {
