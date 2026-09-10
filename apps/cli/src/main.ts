@@ -110,8 +110,9 @@ async function main(): Promise<number> {
       return importCommand(path.resolve(source));
     }
     case 'update':
-      info('\nThe installation is a Git clone of a release. Fetch the new tag inside it, build it, run the');
-      info('migrations and only then restart. Local changes made by a story survive as an ordinary merge.\n');
+      info('\nUpdate from the cockpit: System Status shows an update button whenever the installation is');
+      info('behind the newest release. It stops the services, fetches the release, rebuilds, migrates, runs');
+      info('the tests and starts everything again, restoring the current version if any step fails.\n');
       return 0;
     case 'rollback':
       info('\nCheck the previous release tag out inside the installation, rebuild it and restore the state');

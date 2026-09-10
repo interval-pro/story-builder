@@ -1,6 +1,7 @@
-import { HttpRouter, loadConfig, RESPONSE_HANDLED } from '@ai-engine/shared';
+import { HttpRouter, loadConfig, RESPONSE_HANDLED, ValidationError } from '@ai-engine/shared';
 import { GitClient, readInstallationVersion } from '@ai-engine/git';
 import { fetchLatestRelease } from '@ai-engine/github';
+import { assertCanApply, startApply } from '../apply';
 import { claudeCliAvailable } from '@ai-engine/claude-code';
 import { checkBaseDrift } from '@ai-engine/conflict-engine';
 import { primaryProjectId, type ApiContext } from '../context';
@@ -47,6 +48,39 @@ export function registerSystemRoutes(router: HttpRouter, context: ApiContext): v
   });
 
   router.get('/api/projects', async () => ({ projects: await context.repos.projects.list() }));
+
+  /**
+   * Moves this installation to the newest release. The candidate is a tag
+   * rather than a task branch; everything after that is the same path, so an
+   * upgrade and a change of our own are applied and rolled back identically.
+   */
+  router.post('/api/system/sync', async () => {
+    const installation = await context.repos.projects.findInstallation();
+    if (!installation) {
+      throw new ValidationError('This installation is not registered as a project. Run "ai-engine init" again.');
+    }
+
+    const git = new GitClient(installation.repoPath);
+    const remote = await git.remoteUrl();
+    if (!remote) throw new ValidationError('The installation has no remote to update from');
+
+    const latest = await fetchLatestRelease(remote);
+    if (!latest) throw new ValidationError('No published release could be read from the remote');
+
+    const version = await readInstallationVersion(installation.repoPath, latest.tag);
+    if (version.tag === latest.tag && version.localCommits === 0) {
+      throw new ValidationError(`Already on ${latest.tag}`);
+    }
+
+    await assertCanApply(context, installation);
+    const record = await startApply(context, {
+      installation,
+      taskId: null,
+      source: 'UPSTREAM',
+      candidateRef: latest.tag,
+    });
+    return { applyId: record.id, status: record.status, candidateRef: record.candidateRef };
+  });
 
   router.get('/api/system/apply', async () => {
     const installation = await context.repos.projects.findInstallation();

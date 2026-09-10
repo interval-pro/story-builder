@@ -1,8 +1,6 @@
-import { spawn } from 'node:child_process';
-import path from 'node:path';
-import { HttpRouter, loadConfig, ValidationError } from '@ai-engine/shared';
+import { HttpRouter, ValidationError } from '@ai-engine/shared';
 import { transitionsFrom } from '@ai-engine/domain';
-import { GitClient } from '@ai-engine/git';
+import { assertCanApply, startApply } from '../apply';
 import { actorFrom, primaryProjectId, requireBody, type ApiContext } from '../context';
 
 /** Task state, execution progress and the human control actions. */
@@ -80,6 +78,11 @@ export function registerTaskRoutes(router: HttpRouter, context: ApiContext): voi
    * it runs, including this process, so the work is handed to a detached
    * process and the answer here only says that it started.
    */
+  /**
+   * Applies a finished installation task to the engine. Everything stops while
+   * it runs, including this process, so the work is handed to a detached
+   * process and the answer here only says that it started.
+   */
   router.post('/api/tasks/:id/apply', async ({ params }) => {
     const task = await context.repos.tasks.getById(params['id']!);
     const project = await context.repos.projects.getById(task.projectId);
@@ -90,51 +93,13 @@ export function registerTaskRoutes(router: HttpRouter, context: ApiContext): voi
       throw new ValidationError(`The task is ${task.state}. Only a completed task can be applied.`);
     }
 
-    const running = await context.repos.installationApplies.findRunning();
-    if (running) throw new ValidationError('Another apply is already running');
-
-    for (const candidate of await context.repos.projects.list()) {
-      const active = await context.repos.tasks.listActive(candidate.id);
-      if (active.length > 0) {
-        throw new ValidationError(
-          `${active.length} task(s) are still running. Applying stops every service, so let them finish first.`,
-        );
-      }
-    }
-
-    const git = new GitClient(project.repoPath);
-    const status = await git.status({ includeUntracked: false });
-    if (!status.clean) {
-      throw new ValidationError('The installation has uncommitted changes. Commit or discard them first.');
-    }
-
-    const record = await context.repos.installationApplies.start({
-      projectId: project.id,
+    await assertCanApply(context, project);
+    const record = await startApply(context, {
+      installation: project,
       taskId: task.id,
       source: 'TASK',
       candidateRef: task.branchName,
-      previousCommit: await git.headCommit(),
     });
-
-    await context.events.append({
-      projectId: project.id,
-      taskId: task.id,
-      eventType: 'InstallationApplyStarted',
-      actorType: 'human',
-      actorId: 'cockpit',
-      payload: { applyId: record.id, candidateRef: record.candidateRef },
-    });
-
-    // Detached and unreferenced, so it outlives the API being stopped.
-    const installRoot = loadConfig().paths.installRoot;
-    const child = spawn(process.execPath, [path.join(installRoot, 'apps', 'cli', 'dist', 'apply.js'), record.id], {
-      cwd: installRoot,
-      detached: true,
-      stdio: 'ignore',
-      env: process.env,
-    });
-    child.unref();
-
     return { applyId: record.id, status: record.status, candidateRef: record.candidateRef };
   });
 

@@ -78,10 +78,15 @@ upstream release is the expected, visible outcome of the second kind.
 4. **The installation lives on a real branch.** Cloning a tag leaves a detached
    HEAD, which has nothing to merge into.
 
+5. **Updating is the same path.** A newer release is applied exactly like a
+   task, with a tag as the candidate instead of a branch, so an upgrade and a
+   change of our own are applied, verified and rolled back identically. The
+   merge is attempted as a fast forward first, so an untouched installation
+   lands exactly on the release and reports itself as up to date, while one
+   carrying its own commits merges and is honestly diverged.
+
 ## Deferred
 
-- Syncing with upstream as a normal Git merge, reusing the same apply path with
-  a release as the candidate instead of a task branch.
 - A remote URL as an alternative project input, with the engine owning the clone.
 
 ## Consequences

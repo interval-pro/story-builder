@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api, type Task } from '../../lib/api';
 import { StateBadge } from '../../components/state-badge';
@@ -35,6 +35,16 @@ const VERSION_LABELS: Record<Version['state'], string> = {
   unknown: 'unknown',
 };
 
+interface ApplyRecord {
+  id: string;
+  status: 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'ROLLED_BACK';
+  step: string;
+  log: string;
+  candidateRef: string;
+  source: 'TASK' | 'UPSTREAM';
+  finishedAt: string | null;
+}
+
 interface Health {
   status: string;
   database: boolean;
@@ -48,25 +58,36 @@ interface Health {
 }
 
 export default function SystemPage() {
+  const syncingRef = useRef(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [version, setVersion] = useState<Version | null>(null);
+  const [apply, setApply] = useState<ApplyRecord | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [unreachable, setUnreachable] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
-        const [statusResult, healthResult, versionResult] = await Promise.all([
+        const [statusResult, healthResult, versionResult, applyResult] = await Promise.all([
           api.get<Status>('/api/system/status'),
           api.get<Health>('/api/health'),
           api.get<Version>('/api/system/version').catch(() => null),
+          api.get<{ apply: ApplyRecord | null }>('/api/system/apply').catch(() => ({ apply: null })),
         ]);
         setStatus(statusResult);
         setHealth(healthResult);
         setVersion(versionResult);
+        setApply(applyResult.apply);
+        setUnreachable(false);
+        if (applyResult.apply?.status !== 'RUNNING') setSyncing(false);
         setError(null);
       } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : String(loadError));
+        // While an update is being applied the API is deliberately down, so a
+        // failed poll is expected rather than an error worth showing.
+        if (syncingRef.current) setUnreachable(true);
+        else setError(loadError instanceof Error ? loadError.message : String(loadError));
       }
     }
     void load();
@@ -74,8 +95,32 @@ export default function SystemPage() {
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    syncingRef.current = syncing;
+  }, [syncing]);
+
+  async function sync() {
+    const confirmed = window.confirm(
+      `Updating to ${version?.latestRelease} stops the whole system: the cockpit, the API, the orchestrator ` +
+        'and the worker.\n\nIt then fetches the release, rebuilds, migrates, runs the tests and starts ' +
+        'everything again. This takes a few minutes and the page will be unreachable while it happens.\n\n' +
+        'If anything fails the current version is restored automatically.\n\nUpdate now?',
+    );
+    if (!confirmed) return;
+    setSyncing(true);
+    setUnreachable(false);
+    try {
+      await api.post('/api/system/sync', {});
+    } catch (syncError) {
+      setSyncing(false);
+      setError(syncError instanceof Error ? syncError.message : String(syncError));
+    }
+  }
+
   if (error) return <p className="error">{error}</p>;
   if (!status || !health) return <p className="empty">Loading...</p>;
+
+  const applying = syncing || apply?.status === 'RUNNING';
 
   return (
     <div>
@@ -106,6 +151,22 @@ export default function SystemPage() {
             {version?.state === 'up_to_date' ? `matches ${version.latestRelease}` : null}
           </div>
           <div className="meta">{version?.installRoot ?? ''}</div>
+          {applying ? (
+            <div className="meta" style={{ marginTop: 8 }}>
+              {unreachable ? 'The system is restarting. This page will come back on its own.' : `Updating: ${apply?.step ?? 'starting'}`}
+            </div>
+          ) : null}
+          {!applying && version?.state === 'behind' ? (
+            <button style={{ marginTop: 8 }} onClick={() => void sync()}>
+              Update to {version.latestRelease}
+            </button>
+          ) : null}
+          {!applying && apply && apply.source === 'UPSTREAM' && apply.status !== 'SUCCEEDED' ? (
+            <p className="error">
+              The last update did not finish and the previous version was restored.{' '}
+              {apply.log.trim().split('\n').slice(-1)[0]}
+            </p>
+          ) : null}
         </div>
         <div className="card">
           <div className="meta">Repository</div>

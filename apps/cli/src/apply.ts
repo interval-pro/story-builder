@@ -71,8 +71,27 @@ async function main(): Promise<number> {
     await log('stopping the services');
     await run(path.join(installRoot, 'scripts', 'dev-down.sh'), [], installRoot);
 
+    if (record.source === 'UPSTREAM') {
+      await log('fetching the release', record.candidateRef);
+      const fetched = await run('git', ['fetch', '--tags', 'origin'], installRoot);
+      if (!fetched.ok) {
+        await rollback(`fetch failed: ${fetched.output}`);
+        return 1;
+      }
+    }
+
+    // A fast forward keeps the installation exactly on the release, which is
+    // what an untouched one should report. Only an installation that carries
+    // its own commits needs a merge, and it is then honestly diverged.
     await log('merging the candidate', record.candidateRef);
-    const merge = await run('git', ['merge', '--no-ff', '-m', `Apply ${record.candidateRef}`, record.candidateRef], installRoot);
+    let merge = await run('git', ['merge', '--ff-only', record.candidateRef], installRoot);
+    if (!merge.ok) {
+      merge = await run(
+        'git',
+        ['merge', '--no-ff', '-m', `Apply ${record.candidateRef}`, record.candidateRef],
+        installRoot,
+      );
+    }
     if (!merge.ok) {
       await rollback(`merge failed: ${merge.output}`);
       return 1;
