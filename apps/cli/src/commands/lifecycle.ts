@@ -5,10 +5,11 @@ import { promisify } from 'node:util';
 import { loadConfig } from '@ai-engine/shared';
 import { createRepositories, Database } from '@ai-engine/db';
 import { JobQueue } from '@ai-engine/queue';
-import { failure, heading, info, step, success, table, warn } from '../output';
+import { failure, heading, info, step, success, table } from '../output';
 import { GitClient, readInstallationVersion } from '@ai-engine/git';
 import { fetchLatestRelease } from '@ai-engine/github';
 import { SYSTEM_VERSION } from './init';
+import { resolveProject } from '../project';
 
 const execFileAsync = promisify(execFile);
 
@@ -36,7 +37,7 @@ export async function stopCommand(repoPath: string): Promise<number> {
   return compose(['down'], repoPath);
 }
 
-export async function statusCommand(repoPath: string): Promise<number> {
+export async function statusCommand(repoPath: string, options: { project?: string | undefined } = {}): Promise<number> {
   const config = loadConfig();
   heading('AI Engineering System - status');
 
@@ -58,11 +59,8 @@ export async function statusCommand(repoPath: string): Promise<number> {
       return 1;
     }
     const repos = createRepositories(db);
-    const project = await repos.projects.findPrimary();
-    if (!project) {
-      warn('No project is registered yet. Run "ai-engine init".');
-      return 1;
-    }
+    const project = await resolveProject(repos, options);
+    if (!project) return 1;
     const active = await repos.tasks.listActive(project.id);
     const jobs = await new JobQueue(db).stats();
 
@@ -114,15 +112,12 @@ async function sandboxHealthy(): Promise<boolean> {
  * Exports the portable state of this installation: the brain, the stories and
  * the reviews, without the artifacts that can be regenerated.
  */
-export async function exportCommand(target: string): Promise<number> {
+export async function exportCommand(target: string, options: { project?: string | undefined } = {}): Promise<number> {
   const db = new Database();
   try {
     const repos = createRepositories(db);
-    const project = await repos.projects.findPrimary();
-    if (!project) {
-      failure('No project is registered.');
-      return 1;
-    }
+    const project = await resolveProject(repos, options);
+    if (!project) return 1;
     const stories = await repos.stories.listByProject(project.id, 1000);
     const payload = {
       exportedAt: new Date().toISOString(),
@@ -148,7 +143,7 @@ export async function exportCommand(target: string): Promise<number> {
   }
 }
 
-export async function importCommand(source: string): Promise<number> {
+export async function importCommand(source: string, options: { project?: string | undefined } = {}): Promise<number> {
   const db = new Database();
   try {
     const raw = await readFile(source, 'utf8');
@@ -157,11 +152,8 @@ export async function importCommand(source: string): Promise<number> {
       invariants: { statement: string; scope: string }[];
     };
     const repos = createRepositories(db);
-    const project = await repos.projects.findPrimary();
-    if (!project) {
-      failure('Run "ai-engine init" before importing.');
-      return 1;
-    }
+    const project = await resolveProject(repos, options);
+    if (!project) return 1;
     for (const principle of payload.principles ?? []) {
       await repos.principles.create({
         projectId: project.id,

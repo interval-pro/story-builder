@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { answerPassPolicy, isReadOnlyPhase, policyForPhase } from '../src/phase-policy.ts';
+import { EXECUTION_PHASES } from '@ai-engine/domain';
 
 const ALL_PHASES = ['RESEARCH', 'REVIEW', 'IMPLEMENTATION', 'QA', 'FINAL_REPORT', 'INTEGRATION', 'PUSH'] as const;
 const DELEGATION = ['Agent', 'Task', 'SendMessage', 'ListAgents', 'TaskOutput', 'TaskStop'];
@@ -22,10 +23,12 @@ test('QA reviews the diff without being able to change it', () => {
   assert.ok(policy.disallowedTools?.includes('Edit'));
 });
 
-test('implementation may write but may never push', () => {
+test('implementation may write and run, but may never push', () => {
   const policy = policyForPhase('IMPLEMENTATION');
   assert.equal(policy.restricted, undefined);
-  assert.equal(policy.permissionMode, 'acceptEdits');
+  // `auto` rather than `acceptEdits`: the latter refuses `npm test` in a headless
+  // session, which made the instruction to verify the build impossible to follow.
+  assert.equal(policy.permissionMode, 'auto');
   assert.ok(policy.disallowedTools?.some((entry) => entry.includes('git push')));
   assert.ok(policy.disallowedTools?.some((entry) => entry.includes('git remote')));
   assert.ok(policy.disallowedTools?.some((entry) => entry.includes('sudo')));
@@ -134,4 +137,63 @@ test('the read-only phases are exactly the ones that produce documents', () => {
   assert.equal(isReadOnlyPhase('QA'), true);
   assert.equal(isReadOnlyPhase('IMPLEMENTATION'), false);
   assert.equal(isReadOnlyPhase('INTEGRATION'), false);
+});
+
+test('intake reads the project and cannot write to it', () => {
+  // An idea has no task and no branch, so there is nowhere for it to write and
+  // the repository it is reading is the owner's actual checkout.
+  const policy = policyForPhase('INTAKE');
+  assert.equal(policy.restricted, true);
+  for (const tool of ['Write', 'Edit', 'MultiEdit']) {
+    assert.ok(policy.disallowedTools?.includes(tool), `${tool} must be denied`);
+  }
+});
+
+test('the chat window keeps what a person has in their own terminal', () => {
+  // Narrowing this would make the chat something other than the terminal it is
+  // meant to replace. Only the two denials that reach outside the project stay.
+  const policy = policyForPhase('CHAT', { chatPermissionMode: 'acceptEdits' });
+  assert.equal(policy.restricted, undefined);
+  assert.equal(policy.permissionMode, 'acceptEdits');
+  assert.equal(policy.disallowedTools?.includes('Write'), false);
+  assert.ok(policy.disallowedTools?.includes('Bash(sudo:*)'));
+  assert.ok(policy.disallowedTools?.includes('Bash(rm -rf /:*)'));
+  // Pushing is part of a terminal, unlike in the pipeline where it is a gated
+  // step the system performs rather than an agent.
+  assert.equal(policy.disallowedTools?.includes('Bash(git push:*)'), false);
+});
+
+test('a chat session that may only read is told so through the permission mode', () => {
+  const policy = policyForPhase('CHAT', { chatPermissionMode: 'dontAsk' });
+  assert.equal(policy.permissionMode, 'dontAsk');
+});
+
+test('every phase has a policy, so a new one cannot be added without deciding', () => {
+  for (const phase of EXECUTION_PHASES) {
+    const policy = policyForPhase(phase);
+    assert.ok(policy, phase);
+    assert.ok(Array.isArray(policy.disallowedTools), phase);
+  }
+});
+
+test('the phases that must run the build and the tests are allowed to', () => {
+  // Measured against CLI 2.1.268: under acceptEdits the agent may write files but
+  // `npm test` comes back refused with two recorded denials, because it prompts
+  // and a headless session has nobody to prompt. The implementation agent is told
+  // to verify the build and the tests, so a mode that cannot run them makes that
+  // instruction impossible to follow.
+  for (const phase of ['IMPLEMENTATION', 'INTEGRATION'] as const) {
+    assert.equal(policyForPhase(phase).permissionMode, 'auto', phase);
+  }
+});
+
+test('a phase allowed to run commands still cannot push', () => {
+  // Verified by running `git push --dry-run` under `auto` with this deny list:
+  // refused, with a recorded denial. Pushing stays something the system does after
+  // a human approval.
+  for (const phase of ['IMPLEMENTATION', 'INTEGRATION'] as const) {
+    const denied = policyForPhase(phase).disallowedTools ?? [];
+    assert.ok(denied.includes('Bash(git push:*)'), phase);
+    assert.ok(denied.includes('Bash(sudo:*)'), phase);
+  }
 });

@@ -1,4 +1,5 @@
 import { AppError, loadConfig } from '@ai-engine/shared';
+import { SETTING_KEYS } from '@ai-engine/domain';
 import { changedFiles, GitClient } from '@ai-engine/git';
 import { createRemoteProvider } from '@ai-engine/github';
 import { rebaseOntoBase } from '@ai-engine/conflict-engine';
@@ -154,12 +155,17 @@ export async function handlePushAndPullRequest(context: JobContext): Promise<voi
 
   // The token is injected per invocation. Without one the push depends on an
   // ambient credential helper, which a headless worker usually does not have.
-  const token = loadConfig().github.token;
+  //
+  // Read through the settings rather than from the environment, so a token added
+  // in the cockpit works on the next push instead of after a restart. The
+  // environment variable is still the fallback, which is what keeps an existing
+  // installation working unchanged.
+  const token = await context.repos.settings.text(SETTING_KEYS.githubToken);
   const push = await git.push('origin', context.task.branchName, { token });
   if (push.exitCode !== 0) {
     const hint = token
       ? ''
-      : ' No GITHUB_TOKEN is configured, so the push relied on the local Git credential helper.';
+      : ' No GitHub token is configured, so the push relied on the local Git credential helper. Add one in Settings.';
     await context.orchestrator.block(context.task.id, `Push failed: ${push.stderr}${hint}`, {
       type: 'worker',
       id: context.workerId,

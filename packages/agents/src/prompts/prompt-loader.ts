@@ -4,7 +4,7 @@ import { createLogger, loadConfig } from '@ai-engine/shared';
 
 const logger = createLogger('prompt-loader');
 
-export type AgentType = 'research' | 'review' | 'implementation' | 'qa' | 'learning';
+export type AgentType = 'intake' | 'research' | 'review' | 'implementation' | 'qa' | 'learning';
 
 /**
  * Agent instructions live in the installation, not in the repository being
@@ -12,6 +12,10 @@ export type AgentType = 'research' | 'review' | 'implementation' | 'qa' | 'learn
  * serves the project rather than a change to the project.
  */
 const FALLBACK_PROMPTS: Record<AgentType, string> = {
+  intake:
+    '# Intake Agent\n\nYou are the Intake Agent. You turn an idea into one or more stories. Ask only ' +
+    'what you cannot settle by reading the repository, offer two or three concrete options for each ' +
+    'question, and split an idea into several stories only where they could ship separately.',
   research:
     '# Research Agent\n\nYou are the Research Agent. Understand the story and the repository. ' +
     'You have no write access and you never propose a solution. Every claim must come from code ' +

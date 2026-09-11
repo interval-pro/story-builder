@@ -35,39 +35,52 @@ async function dockerAvailable(): Promise<boolean> {
 }
 
 /**
- * Points an installation at a repository. The engine stays where it is; the
- * repository only gains a marker naming its installation, the runtime manifest
- * that describes how it builds, and a place to put its own rules.
+ * Registers the installation, and optionally a first project.
+ *
+ * A repository is optional because an installation serves as many projects as
+ * are added to it from the cockpit. Installing with none is the normal first
+ * step: the engine comes up, and the first project is one click away. Passing one
+ * here is a convenience for an installation that already knows what it is for.
  */
 export async function initCommand(options: {
-  repoPath: string;
+  repoPath: string | null;
   installRoot: string;
   skipDocker: boolean;
 }): Promise<number> {
   const config = loadConfig();
   heading('Story Builder - init');
 
-  const git = new GitClient(options.repoPath);
-  step('Validating the project repository');
-  if (!(await git.isRepository())) {
-    failure(`${options.repoPath} is not a Git repository.`);
-    return 1;
-  }
-  const root = await git.repositoryRoot();
-  if (!(await git.hasCommits())) {
-    failure(`${root} has no commits yet.`);
-    failure('Every task starts from a base commit, so make the first commit and run init again.');
-    return 1;
-  }
-  const defaultBranch = await git.defaultBranch();
-  const head = await git.headCommit();
-  const remoteUrl = await git.remoteUrl();
-  success(`Repository ${root} on ${defaultBranch} at ${head.slice(0, 10)}`);
+  let root: string | null = null;
+  let defaultBranch = '';
+  let head = '';
+  let remoteUrl: string | null = null;
 
-  if (path.resolve(root) === path.resolve(options.installRoot)) {
-    failure('The installation and the project are the same directory.');
-    failure('Install the engine outside the repository it works on, for example under ~/.story-builder.');
-    return 1;
+  if (options.repoPath) {
+    const git = new GitClient(options.repoPath);
+    step('Validating the project repository');
+    if (!(await git.isRepository())) {
+      failure(`${options.repoPath} is not a Git repository.`);
+      return 1;
+    }
+    root = await git.repositoryRoot();
+    if (!(await git.hasCommits())) {
+      failure(`${root} has no commits yet.`);
+      failure('Every task starts from a base commit, so make the first commit and run init again.');
+      return 1;
+    }
+    defaultBranch = await git.defaultBranch();
+    head = await git.headCommit();
+    remoteUrl = await git.remoteUrl();
+    success(`Repository ${root} on ${defaultBranch} at ${head.slice(0, 10)}`);
+
+    if (path.resolve(root) === path.resolve(options.installRoot)) {
+      failure('The installation and the project are the same directory.');
+      failure('Install the engine outside the repository it works on, for example under ~/.story-builder.');
+      return 1;
+    }
+  } else {
+    info('No repository was given, so the installation is registered on its own.');
+    info('Add the projects you want worked on from the cockpit.');
   }
 
   step('Reading the installation');
@@ -92,13 +105,10 @@ export async function initCommand(options: {
     const applied = await migrate(db);
     success(applied.length === 0 ? 'Database already up to date' : `Applied ${applied.length} migration(s)`);
 
-    step('Registering the project');
     const commands = new TaskCommands(db);
-    const project = await commands.ensureProject({ name: path.basename(root), repoPath: root });
-    success(project.created ? 'Project registered' : 'Project already registered');
 
     // The installation is a project too, so a story can change the engine that
-    // serves this repository without touching the repository.
+    // serves these repositories without touching any of them.
     step('Registering the installation as a project');
     const installProject = await commands.ensureProject({
       name: `${path.basename(options.installRoot)} (installation)`,
@@ -107,34 +117,41 @@ export async function initCommand(options: {
     });
     success(installProject.created ? 'Installation registered' : 'Installation already registered');
 
-    step('Writing the installation marker');
-    await writeInstallationMarker(root, {
-      installRoot: path.resolve(options.installRoot),
-      name: path.basename(options.installRoot),
-      version: version.tag,
-      installedAt: new Date().toISOString(),
-    });
-    success('The project now knows which installation serves it');
-
-    step('Inspecting the project runtime');
-    const manifest = await detectRuntimeManifest(root);
     const repositories = createRepositories(db);
-    await repositories.runtimeManifests.create(project.id, manifest);
-    const projectConfigRoot = path.join(root, '.ai-engineering');
-    await mkdir(path.join(projectConfigRoot, 'project-rules'), { recursive: true });
-    await writeFile(path.join(projectConfigRoot, 'runtime-manifest.yaml'), toYaml(manifest), 'utf8');
-    await writeFile(path.join(projectConfigRoot, 'project-rules', 'README.md'), PROJECT_RULES_README, 'utf8');
-    success(`Runtime manifest generated (${manifest.project.language.join(', ') || 'no language detected'})`);
-    for (const gap of manifestGaps(manifest)) warn(gap);
-
-    step('Building the initial project knowledge');
     const knowledge = new KnowledgeService(db);
-    const { snapshot, extraction } = await knowledge.buildSnapshot({
-      projectId: project.id,
-      gitCommit: head,
-      repositoryPath: root,
-    });
-    success(`Knowledge snapshot ${snapshot.sequence} built from ${extraction.entities.length} entities`);
+
+    if (root) {
+      step('Registering the project');
+      const project = await commands.ensureProject({ name: path.basename(root), repoPath: root });
+      success(project.created ? 'Project registered' : 'Project already registered');
+
+      step('Writing the installation marker');
+      await writeInstallationMarker(root, {
+        installRoot: path.resolve(options.installRoot),
+        name: path.basename(options.installRoot),
+        version: version.tag,
+        installedAt: new Date().toISOString(),
+      });
+      success('The project now knows which installation serves it');
+
+      step('Inspecting the project runtime');
+      const manifest = await detectRuntimeManifest(root);
+      await repositories.runtimeManifests.create(project.id, manifest);
+      const projectConfigRoot = path.join(root, '.ai-engineering');
+      await mkdir(path.join(projectConfigRoot, 'project-rules'), { recursive: true });
+      await writeFile(path.join(projectConfigRoot, 'runtime-manifest.yaml'), toYaml(manifest), 'utf8');
+      await writeFile(path.join(projectConfigRoot, 'project-rules', 'README.md'), PROJECT_RULES_README, 'utf8');
+      success(`Runtime manifest generated (${manifest.project.language.join(', ') || 'no language detected'})`);
+      for (const gap of manifestGaps(manifest)) warn(gap);
+
+      step('Building the initial project knowledge');
+      const { snapshot, extraction } = await knowledge.buildSnapshot({
+        projectId: project.id,
+        gitCommit: head,
+        repositoryPath: root,
+      });
+      success(`Knowledge snapshot ${snapshot.sequence} built from ${extraction.entities.length} entities`);
+    }
 
     step('Building the knowledge for the installation');
     const installManifest = await detectRuntimeManifest(options.installRoot);
@@ -148,12 +165,12 @@ export async function initCommand(options: {
 
     heading('Ready');
     table([
-      ['Project', root],
+      ['Project', root ?? 'none yet — add one from the cockpit'],
       ['Installation', options.installRoot],
       ['Installation branch', await installGit.currentBranch().catch(() => 'detached')],
       ['Version', version.tag ?? version.commit.slice(0, 10)],
       ['Latest release', latest?.tag ?? 'unknown'],
-      ['Default branch', defaultBranch],
+      ['Default branch', defaultBranch || '—'],
       ['Remote', remoteUrl ?? 'none (pull requests are disabled)'],
       ['AI provider', `${config.ai.provider} (${config.ai.model})`],
       ['Sandboxing', config.sandbox.enabled ? `docker (${config.sandbox.image})` : 'host worktrees'],

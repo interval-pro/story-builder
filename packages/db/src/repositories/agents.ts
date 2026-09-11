@@ -1,5 +1,5 @@
 import { newId, NotFoundError, sha256 } from '@ai-engine/shared';
-import type { AgentDefinition, AgentVersion } from '@ai-engine/domain';
+import type { AgentDefinition, AgentKind, AgentVersion } from '@ai-engine/domain';
 import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
 
@@ -10,7 +10,7 @@ const VERSION_COLUMNS = `id, agent_id, version, prompt, prompt_hash, provider, m
 export class AgentRepository {
   constructor(private readonly db: Queryable) {}
 
-  async ensureAgent(type: AgentDefinition['type'], name: string): Promise<AgentDefinition> {
+  async ensureAgent(type: AgentKind, name: string): Promise<AgentDefinition> {
     const row = await this.db.queryOne(
       `INSERT INTO agents (id, type, name) VALUES ($1, $2, $3)
        ON CONFLICT (type) DO UPDATE SET name = EXCLUDED.name RETURNING ${AGENT_COLUMNS}`,
@@ -23,7 +23,7 @@ export class AgentRepository {
     return camelizeAll<AgentDefinition>(await this.db.query(`SELECT ${AGENT_COLUMNS} FROM agents ORDER BY type ASC`));
   }
 
-  async findByType(type: AgentDefinition['type']): Promise<AgentDefinition | null> {
+  async findByType(type: AgentKind): Promise<AgentDefinition | null> {
     const row = await this.db.queryOne(`SELECT ${AGENT_COLUMNS} FROM agents WHERE type = $1`, [type]);
     return row ? camelize<AgentDefinition>(row) : null;
   }
@@ -80,7 +80,7 @@ export class AgentRepository {
     return camelize<AgentVersion>(row);
   }
 
-  async getCurrentVersion(type: AgentDefinition['type']): Promise<AgentVersion | null> {
+  async getCurrentVersion(type: AgentKind): Promise<AgentVersion | null> {
     const row = await this.db.queryOne(
       `SELECT v.id, v.agent_id, v.version, v.prompt, v.prompt_hash, v.provider, v.model, v.model_config,
               v.tool_policy_version, v.created_at

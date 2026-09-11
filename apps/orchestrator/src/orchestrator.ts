@@ -101,8 +101,11 @@ export class Orchestrator {
       if (input.enqueue) {
         await queue.enqueue({
           taskId: task.id,
+          // Carried so the queue can name the project without joining through
+          // tasks, which is what makes one shared queue readable.
+          projectId: task.projectId,
           jobType: input.enqueue.jobType,
-          payload: { taskId: task.id, ...input.enqueue.payload },
+          payload: { taskId: task.id, projectId: task.projectId, ...input.enqueue.payload },
         });
       }
 

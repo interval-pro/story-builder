@@ -29,6 +29,15 @@ function documentWith(body: string) {
     }
   }
   document.implementationSteps = [{ order: 1, title: 'Do the thing', detail: 'in this file', files: ['a.ts'] }];
+  // The short version is what an approval is actually given against, so a review
+  // without one is incomplete however full its sections are.
+  document.brief = {
+    headline: 'The thing will be done',
+    approach: 'In this file, the short way.',
+    changes: ['a.ts gains the thing'],
+    watchOut: [],
+    effort: '1 file',
+  };
   return document;
 }
 

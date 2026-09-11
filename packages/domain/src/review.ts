@@ -82,25 +82,84 @@ export interface ImplementationStep {
   files: string[];
 }
 
+/**
+ * The short version of the review.
+ *
+ * The full document runs to twenty two sections and nobody reads all of it
+ * before approving, which means the approval is being given against something
+ * unread. The brief is what a person actually decides on, so the agent writes it
+ * deliberately rather than leaving the reader to skim.
+ */
+export interface ReviewBrief {
+  /** One sentence: what will be different once this is done. */
+  headline: string;
+  /** Two or three sentences of plain language: how, and why this way. */
+  approach: string;
+  /** What changes, one line each. */
+  changes: string[];
+  /** The downsides and risks worth knowing before approving, one line each. */
+  watchOut: string[];
+  /** The size of the change in concrete terms, e.g. "4 files, one migration". */
+  effort: string;
+}
+
+export interface ReviewDecisionOption {
+  key: string;
+  label: string;
+  /** What choosing this means in practice. */
+  detail: string;
+  /** What it costs or rules out. Stated, not implied. */
+  consequence: string;
+  recommended: boolean;
+}
+
+/**
+ * A question the review cannot answer on its own.
+ *
+ * These used to be sentences in the open questions section, which meant nothing
+ * could gate on them: a task could be approved with a blocking question
+ * unanswered and the implementation would guess. A blocking decision now holds
+ * the approval until someone chooses.
+ */
+export interface ReviewDecision {
+  /** Stable across regenerations, so an answer survives a rewrite. */
+  key: string;
+  question: string;
+  detail: string;
+  /** True when implementing without an answer would mean guessing. */
+  blocking: boolean;
+  options: ReviewDecisionOption[];
+}
+
 export interface ReviewDocument {
   summary: string;
+  /** The short version. Absent on a document written before it existed. */
+  brief: ReviewBrief | null;
   sections: ReviewSection[];
   implementationSteps: ImplementationStep[];
   expectedFiles: string[];
   expectedSymbols: string[];
   riskSignals: { indicator: string; evidence: string }[];
   openQuestions: string[];
+  /** Questions for a human. A blocking one stops the approval. */
+  decisions: ReviewDecision[];
+}
+
+export function emptyReviewBrief(): ReviewBrief {
+  return { headline: '', approach: '', changes: [], watchOut: [], effort: '' };
 }
 
 export function emptyReviewDocument(): ReviewDocument {
   return {
     summary: '',
+    brief: emptyReviewBrief(),
     sections: REVIEW_SECTIONS.map((key) => ({ key, title: REVIEW_SECTION_TITLES[key], body: '' })),
     implementationSteps: [],
     expectedFiles: [],
     expectedSymbols: [],
     riskSignals: [],
     openQuestions: [],
+    decisions: [],
   };
 }
 
@@ -125,7 +184,50 @@ export function validateReviewDocument(document: ReviewDocument, size?: TaskSize
   if (document.summary.trim().length === 0) {
     problems.push('The review summary is empty.');
   }
+  // The brief is what the approval is actually given against, so an empty one is
+  // a gap in the review rather than a missing nicety.
+  if (!document.brief || document.brief.headline.trim().length === 0) {
+    problems.push('The short version has no headline.');
+  }
+  if (document.brief && document.brief.changes.length === 0) {
+    problems.push('The short version lists nothing that changes.');
+  }
+  for (const decision of document.decisions) {
+    if (decision.options.length < 2) {
+      problems.push(`Decision "${decision.question}" offers fewer than two options.`);
+    }
+  }
   return problems;
+}
+
+/**
+ * The short version, as markdown.
+ *
+ * Kept beside the full renderer so the two cannot drift into describing
+ * different documents.
+ */
+export function renderReviewBrief(document: ReviewDocument): string {
+  const brief = document.brief;
+  if (!brief) return document.summary.trim();
+  const parts = [`# ${brief.headline.trim()}`, '', brief.approach.trim()];
+  if (brief.changes.length > 0) {
+    parts.push('', '## What changes', '', ...brief.changes.map((line) => `- ${line}`));
+  }
+  if (brief.watchOut.length > 0) {
+    parts.push('', '## Worth knowing', '', ...brief.watchOut.map((line) => `- ${line}`));
+  }
+  if (brief.effort.trim()) parts.push('', `Size: ${brief.effort.trim()}`);
+  if (document.decisions.length > 0) {
+    parts.push(
+      '',
+      '## Decisions for you',
+      '',
+      ...document.decisions.map(
+        (decision) => `- ${decision.blocking ? '**Blocking.** ' : ''}${decision.question}`,
+      ),
+    );
+  }
+  return parts.join('\n');
 }
 
 /** Renders the review as markdown for human reading and for agent prompts. */
@@ -150,6 +252,17 @@ export function renderReviewMarkdown(document: ReviewDocument): string {
   if (document.openQuestions.length > 0) {
     parts.push(`## Open Questions\n\n${document.openQuestions.map((q) => `- ${q}`).join('\n')}\n`);
   }
+  if (document.decisions.length > 0) {
+    const rendered = document.decisions
+      .map((decision) => {
+        const options = decision.options
+          .map((option) => `   - ${option.label}: ${option.detail} (${option.consequence})`)
+          .join('\n');
+        return `- **${decision.question}**${decision.blocking ? ' (blocking)' : ''}\n${options}`;
+      })
+      .join('\n');
+    parts.push(`## Decisions\n\n${rendered}\n`);
+  }
   return parts.join('\n');
 }
 
@@ -164,6 +277,8 @@ export function renderReviewMarkdown(document: ReviewDocument): string {
  */
 export interface ReviewPatch {
   summary?: string;
+  brief?: ReviewBrief;
+  decisions?: ReviewDecision[];
   sections?: Partial<Record<ReviewSectionKey, string>>;
   implementationSteps?: ImplementationStep[];
   expectedFiles?: string[];
@@ -196,6 +311,8 @@ export function mergeReviewDocument(previous: ReviewDocument, patch: ReviewPatch
 
   return {
     summary: patch.summary ?? previous.summary,
+    brief: patch.brief ?? previous.brief,
+    decisions: patch.decisions ?? previous.decisions,
     sections: keys.map((key) => {
       const body = patched[key];
       return {

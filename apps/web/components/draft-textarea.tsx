@@ -17,15 +17,23 @@ interface Props {
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   rows: number;
   placeholder: string;
+  /**
+   * What the box starts with, for an input that edits something that already
+   * exists. Read once at mount, exactly like `retain`: anything that re-read it
+   * on a later render would be the write-back this component exists to remove.
+   */
+  initialValue?: string;
   onLengthChange?: (length: number) => void;
   /** Keeps a half-written draft across an unmount, for inputs that come and go. */
   retain?: RefObject<string>;
+  /** Enter sends and Shift+Enter makes a newline, for the chat box. */
+  onSubmit?: () => void;
 }
 
-export function DraftTextarea({ textareaRef, rows, placeholder, onLengthChange, retain }: Props) {
+export function DraftTextarea({ textareaRef, rows, placeholder, initialValue, onLengthChange, retain, onSubmit }: Props) {
   // Read once at mount: React syncs a *changed* defaultValue onto a pristine
   // field, which would be the same write-back this component exists to remove.
-  const initial = useRef(retain?.current ?? '');
+  const initial = useRef(retain?.current ?? initialValue ?? '');
 
   useEffect(() => {
     // Hold the element itself rather than reading the ref from the cleanup.
@@ -47,6 +55,16 @@ export function DraftTextarea({ textareaRef, rows, placeholder, onLengthChange, 
       placeholder={placeholder}
       defaultValue={initial.current}
       onChange={(event) => onLengthChange?.(event.target.value.trim().length)}
+      onKeyDown={
+        onSubmit
+          ? (event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                onSubmit();
+              }
+            }
+          : undefined
+      }
     />
   );
 }

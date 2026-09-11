@@ -10,3 +10,6 @@ export * from './brain';
 export * from './knowledge';
 export * from './coordination';
 export * from './installation';
+export * from './settings';
+export * from './ideas';
+export * from './chat';

@@ -4,8 +4,9 @@ import { runClaudeCli } from './cli';
 import { parseStructuredAnswer } from './structured-output';
 import { resultTimeoutFor } from './timeouts';
 import { answerPassPolicy, policyForPhase, type PhasePolicy } from './phase-policy';
-import { mergeUsage, type PassUsage } from './usage';
-import type { ClaudeResult, ClaudeStreamEvent } from './types';
+import { mergeUsage } from './usage';
+import { passUsage, withWorkPassSpend } from './pass-failure';
+import type { ClaudeStreamEvent } from './types';
 
 const logger = createLogger('claude-code-runner');
 
@@ -36,21 +37,17 @@ export interface ClaudeCodeRunnerOptions {
    * inline on every run.
    */
   additionalDirectories?: string[];
+  /**
+   * What a chat session may do in the project directory. Only the CHAT phase
+   * reads it; every other phase's permission mode follows from what that phase
+   * is allowed to be, and is not the caller's to choose.
+   */
+  chatPermissionMode?: 'acceptEdits' | 'auto' | 'bypassPermissions' | 'manual' | 'dontAsk' | 'plan';
   /** Called for every tool the CLI uses, so the audit log stays complete. */
   onToolUse?: (use: { name: string; input: Record<string, unknown> }) => void | Promise<void>;
 }
 
 
-
-/** What one pass spent, in the shape the merge works on. */
-function passUsage(result: ClaudeResult): PassUsage {
-  return {
-    usage: result.usage,
-    costUsd: result.costUsd,
-    modelUsage: result.modelUsage,
-    subagentStats: result.subagentStats,
-  };
-}
 
 /**
  * Runs each agent as a headless Claude Code session inside the task worktree.
@@ -64,7 +61,10 @@ export class ClaudeCodeAgentRunner implements AgentRunner {
   constructor(private readonly options: ClaudeCodeRunnerOptions) {}
 
   async run<T>(request: AgentRunRequest<T>): Promise<AgentRunOutcome<T>> {
-    const basePolicy = policyForPhase(request.phase, { allowSubagents: this.options.allowSubagents ?? false });
+    const basePolicy = policyForPhase(request.phase, {
+      allowSubagents: this.options.allowSubagents ?? false,
+      ...(this.options.chatPermissionMode ? { chatPermissionMode: this.options.chatPermissionMode } : {}),
+    });
     const policy: PhasePolicy = this.options.effort ? { ...basePolicy, effort: this.options.effort } : basePolicy;
     const sessionId = request.resumeSessionId ?? newId();
     let iteration = 0;
@@ -112,6 +112,11 @@ export class ClaudeCodeAgentRunner implements AgentRunner {
     // given no additional directory either. It carries the work pass's own
     // effort: changing the effort inside a session rebuilds the prompt cache
     // from scratch, and this pass resumes the session the work pass just filled.
+    //
+    // A failure here is re-thrown carrying both passes' usage. The work pass has
+    // already happened and has usually spent almost everything the run will
+    // spend; letting its numbers die with the answer pass is what made a run that
+    // got all the way to the last step look free.
     const answer = await runClaudeCli({
       cwd: this.options.workspacePath,
       prompt: request.resultInstruction,
@@ -120,6 +125,8 @@ export class ClaudeCodeAgentRunner implements AgentRunner {
       ...answerPassPolicy({ allowSubagents: this.options.allowSubagents ?? false, effort: policy.effort }),
       ...(this.options.model ? { model: this.options.model } : {}),
       ...(this.options.binary ? { binary: this.options.binary } : {}),
+    }).catch((error: unknown) => {
+      throw withWorkPassSpend(error, work);
     });
 
     const spend = mergeUsage(passUsage(work), passUsage(answer));
@@ -140,3 +147,4 @@ export class ClaudeCodeAgentRunner implements AgentRunner {
     };
   }
 }
+

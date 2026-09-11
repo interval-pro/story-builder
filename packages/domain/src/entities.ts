@@ -21,6 +21,15 @@ export interface Project {
   remoteUrl: string | null;
   /** An installation is the engine itself, registered so stories can change it. */
   kind: ProjectKind;
+  description: string | null;
+  /**
+   * A project added from the cockpit is not usable until its runtime manifest
+   * and its first knowledge snapshot exist. Holding that state here is what lets
+   * the cockpit say "still preparing" instead of failing the first story.
+   */
+  setupState: 'PENDING' | 'RUNNING' | 'READY' | 'FAILED';
+  setupError: string | null;
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -70,7 +79,13 @@ export interface Task {
 
 export interface TaskRun {
   id: string;
-  taskId: string;
+  /** Null for work that is not a task: an idea intake or a chat turn. */
+  taskId: string | null;
+  projectId: string;
+  /** What this run was for. Every kind shares one usage ledger. */
+  kind: 'TASK' | 'IDEA' | 'CHAT';
+  /** The idea session or chat session, when this is not a task run. */
+  subjectId: string | null;
   phase: ExecutionPhase;
   agentType: string;
   agentVersionId: string | null;
@@ -162,9 +177,11 @@ export interface Approval {
   decidedAt: string;
 }
 
+export type AgentKind = 'intake' | 'research' | 'review' | 'implementation' | 'qa' | 'learning' | 'chat';
+
 export interface AgentDefinition {
   id: string;
-  type: 'research' | 'review' | 'implementation' | 'qa' | 'learning';
+  type: AgentKind;
   name: string;
   currentVersionId: string | null;
   createdAt: string;
@@ -213,7 +230,15 @@ export interface SystemEvent {
 export interface Job {
   id: string;
   taskId: string | null;
+  /** Set for work that belongs to a project rather than to one of its tasks. */
+  projectId: string | null;
   jobType: JobType;
+  /** Hand-ordered position in the single global queue. */
+  position: string;
+  /** Whether this job occupies one of the global concurrency slots. */
+  consumesSlot: boolean;
+  /** Set when a person parked this one entry without pausing the whole queue. */
+  heldAt: string | null;
   payload: Record<string, unknown>;
   status: JobStatus;
   attempt: number;
@@ -363,7 +388,18 @@ export interface QaRun {
   iteration: number;
   verdict: 'APPROVED' | 'REJECTED' | 'BLOCKED';
   findings: QaFinding[];
+  /**
+   * Remarks the run did not block on. They were described in the summary prose
+   * and then never reached the agent that could have acted on them.
+   */
+  notes: QaNote[];
   createdAt: string;
+}
+
+export interface QaNote {
+  summary: string;
+  detail: string;
+  file: string | null;
 }
 
 export interface QaFinding {
@@ -428,4 +464,143 @@ export interface InstallationApply {
   log: string;
   startedAt: string;
   finishedAt: string | null;
+}
+
+/** A value the cockpit may change while the system runs. */
+export interface Setting {
+  key: string;
+  value: string;
+  secret: boolean;
+  updatedAt: string;
+}
+
+/**
+ * One row of the single global queue, with everything needed to show it: which
+ * project and story it belongs to, and what it is waiting on.
+ */
+export interface QueueEntry {
+  id: string;
+  jobType: JobType;
+  status: JobStatus;
+  position: string;
+  consumesSlot: boolean;
+  heldAt: string | null;
+  attempt: number;
+  maxAttempts: number;
+  availableAt: string;
+  createdAt: string;
+  lockedBy: string | null;
+  lockedAt: string | null;
+  lastError: string | null;
+  taskId: string | null;
+  taskState: TaskState | null;
+  projectId: string | null;
+  projectName: string | null;
+  storyTitle: string | null;
+}
+
+/** A task that cannot move until a person answers something. */
+export interface WaitingTask {
+  taskId: string;
+  projectId: string;
+  projectName: string;
+  storyTitle: string;
+  state: TaskState;
+  since: string;
+  /** Blocking decisions still open on the current review version. */
+  openDecisions: number;
+  blockedReason: string | null;
+}
+
+export type IdeaSessionStatus = 'QUEUED' | 'THINKING' | 'ASKING' | 'READY' | 'FAILED' | 'DISCARDED';
+
+export interface IdeaSession {
+  id: string;
+  projectId: string;
+  idea: string;
+  status: IdeaSessionStatus;
+  /** What the agent understood, so a wrong reading shows before the questions. */
+  understanding: string | null;
+  round: number;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IdeaQuestionOption {
+  key: string;
+  label: string;
+  detail: string;
+}
+
+export interface IdeaQuestion {
+  id: string;
+  sessionId: string;
+  round: number;
+  sequence: number;
+  question: string;
+  rationale: string;
+  options: IdeaQuestionOption[];
+  /** An option key, or 'custom' when the answer was written by hand. */
+  chosenKey: string | null;
+  customAnswer: string | null;
+  answeredAt: string | null;
+  createdAt: string;
+}
+
+export interface StoryDraft {
+  id: string;
+  projectId: string;
+  sessionId: string | null;
+  title: string;
+  body: string;
+  rationale: string;
+  sequence: number;
+  status: 'DRAFT' | 'LAUNCHED' | 'DISCARDED';
+  taskId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReviewDecisionRecord {
+  id: string;
+  taskId: string;
+  reviewVersionId: string;
+  key: string;
+  question: string;
+  detail: string;
+  blocking: boolean;
+  options: { key: string; label: string; detail: string; consequence: string; recommended: boolean }[];
+  status: 'OPEN' | 'ANSWERED';
+  /** An option key, or 'custom', or 'agent' to leave the choice to the engineer. */
+  chosenKey: string | null;
+  customAnswer: string | null;
+  answeredBy: string | null;
+  answeredAt: string | null;
+  createdAt: string;
+}
+
+export interface ChatSession {
+  id: string;
+  projectId: string;
+  title: string;
+  engineSessionId: string | null;
+  permissionMode: string;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  sessionId: string;
+  sequence: number;
+  role: 'user' | 'assistant';
+  content: string;
+  status: 'PENDING' | 'STREAMING' | 'COMPLETE' | 'FAILED';
+  toolCalls: { name: string; input: Record<string, unknown> }[];
+  runId: string | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
 }

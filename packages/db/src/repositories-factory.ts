@@ -3,9 +3,11 @@ import {
   AgentRepository,
   ApprovalRepository,
   ArtifactRepository,
+  ChatRepository,
   CheckpointRepository,
   ConflictRepository,
   GitChangeRepository,
+  IdeaRepository,
   ImpactRepository,
   InstallationApplyRepository,
   InvariantRepository,
@@ -15,7 +17,9 @@ import {
   PrincipleRepository,
   ProjectRepository,
   QaRunRepository,
+  ReviewDecisionRepository,
   ReviewRepository,
+  SettingsRepository,
   RuntimeManifestRepository,
   SandboxRepository,
   StoryRepository,
@@ -34,6 +38,7 @@ export interface Repositories {
   toolCalls: ToolCallRepository;
   checkpoints: CheckpointRepository;
   reviews: ReviewRepository;
+  reviewDecisions: ReviewDecisionRepository;
   approvals: ApprovalRepository;
   agents: AgentRepository;
   artifacts: ArtifactRepository;
@@ -51,6 +56,9 @@ export interface Repositories {
   dependencies: TaskDependencyRepository;
   gitChanges: GitChangeRepository;
   installationApplies: InstallationApplyRepository;
+  settings: SettingsRepository;
+  ideas: IdeaRepository;
+  chat: ChatRepository;
 }
 
 /**
@@ -66,6 +74,7 @@ export function createRepositories(db: Queryable): Repositories {
     toolCalls: new ToolCallRepository(db),
     checkpoints: new CheckpointRepository(db),
     reviews: new ReviewRepository(db),
+    reviewDecisions: new ReviewDecisionRepository(db),
     approvals: new ApprovalRepository(db),
     agents: new AgentRepository(db),
     artifacts: new ArtifactRepository(db),
@@ -83,5 +92,8 @@ export function createRepositories(db: Queryable): Repositories {
     dependencies: new TaskDependencyRepository(db),
     gitChanges: new GitChangeRepository(db),
     installationApplies: new InstallationApplyRepository(db),
+    settings: new SettingsRepository(db),
+    ideas: new IdeaRepository(db),
+    chat: new ChatRepository(db),
   };
 }

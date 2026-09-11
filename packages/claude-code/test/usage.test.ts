@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readUsage } from '../src/cli.ts';
+import { accumulateStreamUsage, readUsage } from '../src/cli.ts';
+import { withWorkPassSpend } from '../src/pass-failure.ts';
+import { AppError } from '@ai-engine/shared';
 import { mergeUsage, readModelUsage, readSubagentStats, type PassUsage } from '../src/usage.ts';
 
 function pass(overrides: Partial<PassUsage> = {}): PassUsage {
@@ -112,4 +114,82 @@ test('a pass that reported nothing leaves the other pass exactly as it was', () 
   const reversed = mergeUsage(pass(), work);
   assert.deepEqual(reversed.modelUsage, work.modelUsage);
   assert.deepEqual(reversed.subagentStats, work.subagentStats);
+});
+
+test('a run killed before it finishes still knows what the stream reported', () => {
+  // The final payload is where usage normally comes from, and a killed process
+  // never prints one. Before this, a run that burned an hour of context and was
+  // then killed recorded zero, which is how fifteen of thirty-one runs came to
+  // show nothing at all.
+  let total = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
+  for (const turn of [
+    { input_tokens: 4, output_tokens: 120, cache_read_input_tokens: 18_000, cache_creation_input_tokens: 9_000 },
+    { input_tokens: 6, output_tokens: 240, cache_read_input_tokens: 27_000, cache_creation_input_tokens: 1_500 },
+  ]) {
+    total = accumulateStreamUsage(total, { type: 'assistant', message: { usage: turn } } as never);
+  }
+  assert.deepEqual(total, {
+    inputTokens: 10,
+    outputTokens: 360,
+    cacheReadTokens: 45_000,
+    cacheCreationTokens: 10_500,
+  });
+});
+
+test('only assistant turns carry usage, so nothing else is counted twice', () => {
+  const empty = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
+  const afterUser = accumulateStreamUsage(empty, {
+    type: 'user',
+    message: { usage: { input_tokens: 999 } },
+  } as never);
+  assert.deepEqual(afterUser, empty);
+
+  const afterResult = accumulateStreamUsage(empty, { type: 'result', usage: { input_tokens: 999 } } as never);
+  assert.deepEqual(afterResult, empty);
+});
+
+test('an answer pass that fails carries the work pass it resumed', () => {
+  // The work pass is the expensive half. Letting its numbers die with the answer
+  // pass made a run that got all the way to the last step look free.
+  const work = {
+    sessionId: 'session-1',
+    usage: { inputTokens: 10, outputTokens: 1_000, cacheReadTokens: 50_000, cacheCreationTokens: 20_000 },
+    costUsd: 1.5,
+    modelUsage: { 'claude-opus-5': { output: 1_000 } },
+    subagentStats: null,
+  } as never;
+
+  const failure = new AppError('claude_cli_timeout', 'timed out', 504, {
+    usage: { inputTokens: 1, outputTokens: 5, cacheReadTokens: 100, cacheCreationTokens: 0 },
+    costUsd: 0.1,
+  });
+
+  const merged = withWorkPassSpend(failure, work) as AppError;
+  const details = merged.details!;
+  assert.deepEqual(details['usage'], {
+    inputTokens: 11,
+    outputTokens: 1_005,
+    cacheReadTokens: 50_100,
+    cacheCreationTokens: 20_000,
+  });
+  assert.equal(details['costUsd'], 1.6);
+  assert.equal(details['sessionId'], 'session-1');
+  assert.equal(merged.code, 'claude_cli_timeout');
+});
+
+test('an answer pass failure with no usage of its own still reports the work pass', () => {
+  const work = {
+    sessionId: 'session-2',
+    usage: { inputTokens: 0, outputTokens: 900, cacheReadTokens: 400, cacheCreationTokens: 300 },
+    costUsd: 0.4,
+    modelUsage: null,
+    subagentStats: null,
+  } as never;
+  const merged = withWorkPassSpend(new AppError('claude_cli_failed', 'no result', 502), work) as AppError;
+  assert.equal((merged.details!['usage'] as { outputTokens: number }).outputTokens, 900);
+});
+
+test('something that is not an engine error is returned untouched', () => {
+  const plain = new Error('spawn failed');
+  assert.equal(withWorkPassSpend(plain, {} as never), plain);
 });

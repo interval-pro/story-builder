@@ -1,10 +1,10 @@
 import { HttpRouter } from '@ai-engine/shared';
-import { primaryProjectId, requireBody, type ApiContext } from '../context';
+import { resolveProjectId, requireBody, type ApiContext } from '../context';
 
 /** Project Brain: principles, invariants and the knowledge graph. */
 export function registerBrainRoutes(router: HttpRouter, context: ApiContext): void {
   router.get('/api/project-brain', async ({ query }) => {
-    const projectId = await primaryProjectId(context, query.get('projectId'));
+    const projectId = await resolveProjectId(context, query.get('projectId'));
     const [principles, invariants] = await Promise.all([
       context.repos.principles.listAll(projectId),
       context.repos.invariants.listAll(projectId),
@@ -13,7 +13,7 @@ export function registerBrainRoutes(router: HttpRouter, context: ApiContext): vo
   });
 
   router.post('/api/project-brain/principles', async ({ body, query }) => {
-    const projectId = await primaryProjectId(context, query.get('projectId'));
+    const projectId = await resolveProjectId(context, query.get('projectId'));
     const input = requireBody<{ category: string; statement: string; scope?: string }>(body, ['category', 'statement']);
     const principle = await context.repos.principles.create({
       projectId,
@@ -35,7 +35,7 @@ export function registerBrainRoutes(router: HttpRouter, context: ApiContext): vo
   });
 
   router.post('/api/project-brain/invariants', async ({ body, query }) => {
-    const projectId = await primaryProjectId(context, query.get('projectId'));
+    const projectId = await resolveProjectId(context, query.get('projectId'));
     const input = requireBody<{ statement: string; scope?: string }>(body, ['statement']);
     const invariant = await context.repos.invariants.create({
       projectId,
@@ -53,7 +53,7 @@ export function registerBrainRoutes(router: HttpRouter, context: ApiContext): vo
   });
 
   router.get('/api/project-knowledge', async ({ query }) => {
-    const projectId = await primaryProjectId(context, query.get('projectId'));
+    const projectId = await resolveProjectId(context, query.get('projectId'));
     const snapshots = await context.knowledge.listSnapshots(projectId);
     const snapshotId = query.get('snapshotId') ?? snapshots[0]?.id ?? null;
     if (!snapshotId) return { snapshots, snapshotId: null, entities: [], summary: null };
@@ -69,7 +69,7 @@ export function registerBrainRoutes(router: HttpRouter, context: ApiContext): vo
   });
 
   router.get('/api/project-knowledge/search', async ({ query }) => {
-    const projectId = await primaryProjectId(context, query.get('projectId'));
+    const projectId = await resolveProjectId(context, query.get('projectId'));
     const term = query.get('q') ?? '';
     const snapshot = await context.knowledge.latest(projectId);
     if (!snapshot || !term) return { entities: [] };

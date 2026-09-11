@@ -1,8 +1,10 @@
-import { AppError, createLogger, newId, slugify } from '@ai-engine/shared';
+import path from 'node:path';
+import { AppError, createLogger, loadConfig, newId, slugify } from '@ai-engine/shared';
 import {
   classifyRisk,
   classifyTaskSize,
   requiresSecondApproval,
+  type Project,
   type ProjectKind,
   type RiskSignal,
   type Story,
@@ -46,6 +48,16 @@ export class TaskCommands {
   async createStory(input: CreateStoryInput): Promise<{ story: Story; revision: StoryRevision; task: Task }> {
     const repos = createRepositories(this.db);
     const project = await repos.projects.getById(input.projectId);
+    if (project.setupState !== 'READY') {
+      throw new AppError(
+        'project_not_ready',
+        project.setupState === 'FAILED'
+          ? `${project.name} could not be prepared: ${project.setupError ?? 'no reason was recorded'}`
+          : `${project.name} is still being prepared. A story needs its runtime manifest and first knowledge snapshot.`,
+        409,
+        { setupState: project.setupState },
+      );
+    }
 
     const git = new GitClient(project.repoPath);
     const baseBranch = project.defaultBranch;
@@ -201,6 +213,19 @@ export class TaskCommands {
     const version = await repos.reviews.getLatestVersion(review.id);
     if (!version) throw new AppError('no_review_version', 'This review has no versions yet', 409);
 
+    // A blocking decision is one where implementing without an answer would mean
+    // guessing. Approving over it would hand that guess to the agent, which is
+    // the whole thing the decision exists to prevent.
+    const openBlocking = await repos.reviewDecisions.openBlockingCount(version.id);
+    if (openBlocking > 0) {
+      throw new AppError(
+        'decisions_open',
+        `${openBlocking} decision(s) on this plan have to be answered before it can be approved.`,
+        409,
+        { openBlocking },
+      );
+    }
+
     await repos.approvals.record({
       taskId: task.id,
       kind: 'REVIEW',
@@ -341,11 +366,30 @@ export class TaskCommands {
     const approvedReviewVersionId = await repos.approvals.findApprovedReviewVersionId(taskId);
     const qaRuns = await repos.qaRuns.listByTask(taskId);
 
+    // A retry before the review was approved used to start the research again,
+    // which threw away whatever notes had been written on the review in the
+    // meantime and produced a second first draft. If there are open notes, the
+    // thing to continue is the regeneration they were written for.
+    const review = approvedReviewVersionId ? null : await repos.reviews.findCurrentForTask(taskId);
+    const openNotes = review ? await repos.reviews.listOpenNotes(review.id) : [];
+
+    // A task that failed after the pull request was approved failed in
+    // integration or in the push. Sending it back to QA would re-run an agent
+    // over a diff that has already been checked and approved.
+    const prApproval = await repos.approvals.findLatest(taskId, 'PR');
+    const pushAttempted = (await repos.runs.listByTask(taskId)).some((run) => run.phase === 'PUSH');
+
     const target = !approvedReviewVersionId
-      ? { state: 'ANALYSIS_QUEUED' as const, jobType: 'RESEARCH' as const }
-      : qaRuns.length === 0
-        ? { state: 'IMPLEMENTATION_QUEUED' as const, jobType: 'IMPLEMENTATION' as const }
-        : { state: 'QA_QUEUED' as const, jobType: 'QA' as const };
+      ? openNotes.length > 0
+        ? { state: 'REVIEW_REGENERATING' as const, jobType: 'REVIEW_REGENERATE' as const }
+        : { state: 'ANALYSIS_QUEUED' as const, jobType: 'RESEARCH' as const }
+      : prApproval?.decision === 'APPROVED'
+        ? pushAttempted
+          ? { state: 'PUSHING' as const, jobType: 'PUSH_AND_PR' as const }
+          : { state: 'INTEGRATION_VALIDATION' as const, jobType: 'INTEGRATION_VALIDATION' as const }
+        : qaRuns.length === 0
+          ? { state: 'IMPLEMENTATION_QUEUED' as const, jobType: 'IMPLEMENTATION' as const }
+          : { state: 'QA_QUEUED' as const, jobType: 'QA' as const };
 
     logger.info('retrying a failed task', { taskId, from: task.failureReason, to: target.state });
     return this.orchestrator.transition({
@@ -358,9 +402,16 @@ export class TaskCommands {
     });
   }
 
-  /** Unblocks a task by sending it back to the phase the human chooses. */
-  async unblock(input: { taskId: string; target: 'ANALYSIS_QUEUED' | 'IMPLEMENTATION_QUEUED' | 'FIX_REQUIRED'; actor: Actor }): Promise<Task> {
-    const jobType = input.target === 'ANALYSIS_QUEUED' ? 'RESEARCH' : input.target === 'IMPLEMENTATION_QUEUED' ? 'IMPLEMENTATION' : 'FIX';
+  /**
+   * Unblocks a task by sending it back to the step the human chooses.
+   *
+   * PUSHING and INTEGRATION_VALIDATION are here because a push that fails blocks
+   * the task, and every other route re-runs an agent over work that was already
+   * finished. Without them the only reachable end was STOPPED, which meant
+   * pushing the branch by hand and leaving the record wrong.
+   */
+  async unblock(input: { taskId: string; target: UnblockTarget; actor: Actor }): Promise<Task> {
+    const jobType = UNBLOCK_JOBS[input.target];
     return this.orchestrator.transition({
       taskId: input.taskId,
       to: input.target,
@@ -369,6 +420,171 @@ export class TaskCommands {
       patch: { blockedReason: null },
       enqueue: { jobType },
     });
+  }
+
+  /**
+   * Answers one decision on the current review version.
+   *
+   * 'custom' carries the person's own words; 'agent' hands the choice back with
+   * the reasons stated, which is a decision in itself and is recorded as one
+   * rather than left as an unanswered question.
+   */
+  async answerDecision(input: {
+    taskId: string;
+    key: string;
+    chosenKey: string;
+    customAnswer?: string | null;
+    actor: Actor;
+  }): Promise<{ answered: number; openBlocking: number }> {
+    const repos = createRepositories(this.db);
+    if (input.chosenKey === 'custom' && !input.customAnswer?.trim()) {
+      throw new AppError('empty_answer', 'Describing the decision yourself needs some text', 400);
+    }
+
+    const decision = await repos.reviewDecisions.answerForTask({
+      taskId: input.taskId,
+      key: input.key,
+      chosenKey: input.chosenKey,
+      customAnswer: input.customAnswer?.trim() || null,
+      answeredBy: input.actor.id,
+    });
+    await new EventLog(this.db).append({
+      projectId: (await repos.tasks.getById(input.taskId)).projectId,
+      taskId: input.taskId,
+      eventType: 'HumanNoteAdded',
+      actorType: input.actor.type,
+      actorId: input.actor.id,
+      payload: { decision: decision.key, chosen: decision.chosenKey, blocking: decision.blocking },
+    });
+
+    const open = await repos.reviewDecisions.listOpenForTask(input.taskId);
+    return { answered: 1, openBlocking: open.filter((entry) => entry.blocking).length };
+  }
+
+  /**
+   * Turns a story draft into a task and starts it.
+   *
+   * The draft is the thing a person edited and kept; this is the one moment it
+   * stops being editable text and becomes work with a branch.
+   */
+  async launchDraft(input: { draftId: string; actor: Actor }): Promise<{ story: Story; task: Task }> {
+    const repos = createRepositories(this.db);
+    const draft = await repos.ideas.getDraft(input.draftId);
+    if (draft.status !== 'DRAFT') {
+      throw new AppError('draft_not_open', `This draft is already ${draft.status.toLowerCase()}`, 409);
+    }
+    const created = await this.createStory({
+      projectId: draft.projectId,
+      title: draft.title,
+      body: draft.body,
+      actor: input.actor,
+      startAnalysis: true,
+    });
+    await repos.ideas.markDraftLaunched(draft.id, created.task.id);
+    return { story: created.story, task: created.task };
+  }
+
+  /**
+   * Registers a repository as a project and queues everything it needs.
+   *
+   * Detecting how a project builds and walking it for the first knowledge
+   * snapshot both mean reading the whole tree, which is not something to do
+   * inside a request. The row exists immediately so the cockpit can show it;
+   * the setup job moves it from PENDING to READY.
+   */
+  async registerProject(input: { repoPath: string; name?: string; description?: string | null }): Promise<Project> {
+    const repos = createRepositories(this.db);
+    const resolved = path.resolve(input.repoPath);
+
+    const installRoot = path.resolve(loadConfig().paths.installRoot);
+    if (resolved === installRoot) {
+      throw new AppError(
+        'project_is_installation',
+        'That directory is the installation itself. It is already registered, and a project has to be a repository the engine works on.',
+        400,
+      );
+    }
+
+    const existing = await repos.projects.findByRepoPath(resolved);
+    if (existing) throw new AppError('project_exists', `${resolved} is already registered as "${existing.name}"`, 409);
+
+    const git = new GitClient(resolved);
+    if (!(await git.isRepository())) {
+      throw new AppError('not_a_repository', `${resolved} is not a Git repository`, 400);
+    }
+    if (!(await git.hasCommits())) {
+      throw new AppError(
+        'no_commits',
+        `${resolved} has no commits yet. Every task starts from a base commit, so make the first one.`,
+        400,
+      );
+    }
+
+    const project = await repos.projects.create({
+      name: input.name?.trim() || path.basename(resolved),
+      repoPath: resolved,
+      defaultBranch: await git.defaultBranch(),
+      remoteUrl: await git.remoteUrl(),
+      description: input.description ?? null,
+      setupState: 'PENDING',
+    });
+
+    await new JobQueue(this.db).enqueue({
+      taskId: null,
+      projectId: project.id,
+      jobType: 'PROJECT_SETUP',
+      payload: { projectId: project.id },
+    });
+    return project;
+  }
+
+  /** Starts a round of turning an idea into stories. */
+  async startIdea(input: { projectId: string; idea: string }): Promise<{ sessionId: string }> {
+    const repos = createRepositories(this.db);
+    const session = await repos.ideas.create({ projectId: input.projectId, idea: input.idea });
+    await new JobQueue(this.db).enqueue({
+      taskId: null,
+      projectId: input.projectId,
+      jobType: 'IDEA_INTAKE',
+      payload: { projectId: input.projectId, sessionId: session.id },
+    });
+    return { sessionId: session.id };
+  }
+
+  /**
+   * Records an answer and, once the round is fully answered, asks the next one.
+   *
+   * The round is the unit: asking again before every question in it is answered
+   * would spend a run on a half-answered round, and answering out of order is
+   * something a person does routinely.
+   */
+  async answerIdeaQuestion(input: {
+    sessionId: string;
+    questionId: string;
+    chosenKey: string;
+    customAnswer?: string | null;
+  }): Promise<{ remaining: number }> {
+    const repos = createRepositories(this.db);
+    const session = await repos.ideas.getById(input.sessionId);
+    if (input.chosenKey === 'custom' && !input.customAnswer?.trim()) {
+      throw new AppError('empty_answer', 'Writing your own answer needs some text', 400);
+    }
+    await repos.ideas.answerQuestion(input.questionId, {
+      chosenKey: input.chosenKey,
+      customAnswer: input.customAnswer?.trim() || null,
+    });
+
+    const remaining = await repos.ideas.unansweredCount(input.sessionId);
+    if (remaining === 0) {
+      await repos.ideas.update(input.sessionId, { status: 'QUEUED' });
+      await new JobQueue(this.db).enqueue({
+        taskId: null,
+        projectId: session.projectId,
+        jobType: 'IDEA_INTAKE',
+        payload: { projectId: session.projectId, sessionId: session.id },
+      });
+    }
+    return { remaining };
   }
 
   /** Used by the CLI to register the repository this installation manages. */
@@ -401,6 +617,19 @@ export class TaskCommands {
     return { id: project.id, created: true };
   }
 }
+
+/** Where a blocked task may be sent back to, and what runs when it gets there. */
+const UNBLOCK_JOBS = {
+  ANALYSIS_QUEUED: 'RESEARCH',
+  IMPLEMENTATION_QUEUED: 'IMPLEMENTATION',
+  FIX_REQUIRED: 'FIX',
+  INTEGRATION_VALIDATION: 'INTEGRATION_VALIDATION',
+  PUSHING: 'PUSH_AND_PR',
+} as const;
+
+export type UnblockTarget = keyof typeof UNBLOCK_JOBS;
+
+export const UNBLOCK_TARGETS = Object.keys(UNBLOCK_JOBS) as UnblockTarget[];
 
 export function newActorId(prefix: string): string {
   return `${prefix}-${newId().slice(0, 8)}`;

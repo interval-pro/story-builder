@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
-# Installs Story Builder as a layer over a project.
+# Installs Story Builder.
 #
 # The engine is cloned from its latest release into its own directory, outside
-# the repository it works on, and the project only gains a marker naming the
-# installation that serves it.
+# any repository it works on. Projects are added afterwards from the cockpit, one
+# click each, and a project only ever gains a marker naming the installation that
+# serves it.
 #
-#   ./install.sh --repo /absolute/path/to/your/repository
+#   ./install.sh
+#   ./install.sh --repo /absolute/path/to/a/repository   # adds one immediately
 #
 # Options:
-#   --repo <path>    the repository to work on (required)
-#   --dir <path>     where to install, default ~/.story-builder/<name>
+#   --repo <path>    optionally register this repository straight away
+#   --dir <path>     where to install, default ~/.story-builder/story-builder
 #   --source <url>   where to install from, a URL or a local checkout
 #   --ref <tag>      install this tag or branch instead of the latest release
-#   --name <name>    name of the installation, default the repository name
+#   --name <name>    name of the installation
 #
 set -euo pipefail
 
@@ -30,24 +32,25 @@ while [ $# -gt 0 ]; do
     --ref) REF="$2"; shift 2 ;;
     --source) SOURCE_URL="$2"; shift 2 ;;
     -h|--help)
-      sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
 
-if [ -z "$REPO" ]; then
-  echo "Usage: ./install.sh --repo /absolute/path/to/your/repository" >&2
-  exit 1
+# A repository is optional now. An installation serves as many projects as you
+# add to it, so installing one with none is normal: you start the cockpit and add
+# the first project there.
+if [ -n "$REPO" ]; then
+  REPO="$(cd "$REPO" && pwd)"
+  if ! git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "$REPO is not a Git repository." >&2
+    exit 1
+  fi
+  REPO="$(git -C "$REPO" rev-parse --show-toplevel)"
+  NAME="${NAME:-$(basename "$REPO")}"
 fi
-
-REPO="$(cd "$REPO" && pwd)"
-if ! git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  echo "$REPO is not a Git repository." >&2
-  exit 1
-fi
-REPO="$(git -C "$REPO" rev-parse --show-toplevel)"
-NAME="${NAME:-$(basename "$REPO")}"
+NAME="${NAME:-story-builder}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.story-builder/$NAME}"
 
 if [ -e "$INSTALL_DIR" ] && [ -n "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]; then
@@ -111,7 +114,9 @@ if [ ! -f .env.local ]; then
   PG_PORT="${PG_PORT:-5433}"
   {
     echo "INSTALL_ROOT=$INSTALL_DIR"
-    echo "PROJECT_ROOT=$REPO"
+    echo "STATE_ROOT=$INSTALL_DIR.state"
+    echo "WORKSPACES_ROOT=$INSTALL_DIR.state/workspaces"
+    echo "ARTIFACTS_ROOT=$INSTALL_DIR.state/artifacts"
     echo "DATABASE_URL=postgres://ai_engine:ai_engine@localhost:$PG_PORT/ai_engine"
     echo "PG_CONTAINER=${PG_CONTAINER:-ai-engine-postgres-$NAME}"
     echo "PG_PORT=$PG_PORT"
@@ -120,7 +125,6 @@ if [ ! -f .env.local ]; then
     echo "AI_PROVIDER=mock"
     echo "API_PORT=4000"
     echo "LOG_LEVEL=info"
-    echo "GITHUB_TOKEN="
   } > .env.local
 fi
 
@@ -134,12 +138,20 @@ if ! docker ps --format '{{.Names}}' | grep -q "^${PG_CONTAINER}$"; then
 fi
 until docker exec "$PG_CONTAINER" pg_isready -U ai_engine -d ai_engine >/dev/null 2>&1; do sleep 1; done
 
-echo "-> Pointing the installation at the project"
-node apps/cli/dist/main.js init --repo "$REPO" --install-root "$INSTALL_DIR"
+echo "-> Registering the installation"
+if [ -n "$REPO" ]; then
+  node apps/cli/dist/main.js init --repo "$REPO" --install-root "$INSTALL_DIR"
+else
+  node apps/cli/dist/main.js init --install-root "$INSTALL_DIR"
+fi
 
 echo
 echo "Installed. Start it with:"
 echo "  cd $INSTALL_DIR && ./scripts/dev-up.sh"
+if [ -z "$REPO" ]; then
+  echo
+  echo "Then open http://localhost:3000 and add the first project."
+fi
 echo
 echo "Worktrees and artifacts live in ${INSTALL_DIR}.state and the database lives in"
 echo "the ${PG_CONTAINER} container. Both survive installing a new version, so removing"

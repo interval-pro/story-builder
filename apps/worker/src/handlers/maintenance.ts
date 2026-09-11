@@ -11,9 +11,12 @@ import {
   createAgentRunner,
   createExecutor,
   recordEngineMetrics,
+  recordSessionStart,
+  resumableSessionFor,
   runCompletion,
   type JobContext,
 } from '../job-context';
+import type { ProjectJobContext } from '../project-context';
 import { SandboxClient } from '../sandbox-client';
 
 const logger = createLogger('maintenance');
@@ -31,10 +34,17 @@ export async function handleLearning(context: JobContext): Promise<void> {
   const versions = await context.repos.reviews.listVersions(engineering.id);
   const qaRuns = await context.repos.qaRuns.listByTask(context.task.id);
 
+  // The session is recorded before the process exists, as every other phase
+  // does. This was the one agent that did not, which made it the one agent whose
+  // death left no record of which conversation it died in.
+  const previousSessionId = await resumableSessionFor(context, 'FINAL_REPORT');
   const learningRun = await context.repos.runs.start({
     taskId: context.task.id,
+    projectId: context.project.id,
     phase: 'FINAL_REPORT',
     agentType: 'learning',
+    sessionId: previousSessionId,
+    ...(previousSessionId ? { resumed: true } : {}),
   });
   const { result, outcome } = await runLearningAgent({
     runner: await createAgentRunner({ context, runId: learningRun.id, phase: 'FINAL_REPORT' }),
@@ -45,6 +55,8 @@ export async function handleLearning(context: JobContext): Promise<void> {
     reviewAfter: versions[versions.length - 1]?.document ?? null,
     qaSummaries: qaRuns.flatMap((run) => run.findings.map((finding) => finding.summary)),
     installRoot: context.installRoot,
+    onSessionStart: recordSessionStart(context, learningRun.id, Boolean(previousSessionId)),
+    ...(previousSessionId ? { resumeSessionId: previousSessionId } : {}),
   });
   // The fifth agent used to record nothing at all, which made it the one agent
   // whose spend a per-agent breakdown could not show.
@@ -96,8 +108,15 @@ export async function handleLearning(context: JobContext): Promise<void> {
   await new ConflictEngine(context.db).releaseLocks(context.task.id);
 }
 
-/** Rebuilds the knowledge snapshot for the current head of the base branch. */
-export async function handleKnowledgeRefresh(context: JobContext): Promise<void> {
+/**
+ * Rebuilds the knowledge snapshot for the current head of the default branch.
+ *
+ * This belongs to the project rather than to any task, which is why it takes a
+ * project context. It used to be anchored to an arbitrary task purely so it had
+ * something to hang a job on, and a project with no tasks yet could not refresh
+ * its knowledge at all.
+ */
+export async function handleKnowledgeRefresh(context: ProjectJobContext): Promise<void> {
   const git = new GitClient(context.project.repoPath);
   const head = (await git.resolveRef(context.project.defaultBranch)) ?? (await git.headCommit());
   const knowledge = new KnowledgeService(context.db);

@@ -42,13 +42,13 @@ function parseArgs(argv: string[]): ParsedArgs {
 function usage(): void {
   heading('ai-engine');
   info(`
-  ai-engine init --repo <path> [--skip-docker]     Point this installation at a repository
+  ai-engine init [--repo <path>] [--skip-docker]   Register the installation, optionally with a project
   ai-engine version                                Show the installed version and upstream drift
   ai-engine start                                  Start the stack with docker compose
   ai-engine stop                                   Stop the stack
-  ai-engine status                                 Show system and task status
-  ai-engine story create --body "..." [--title t] [--installation]
-  ai-engine task list
+  ai-engine status [--project <name>]              Show system and task status
+  ai-engine story create --body "..." [--title t] [--installation] [--project name]
+  ai-engine task list [--project name]
   ai-engine task show <taskId>
   ai-engine export <file>                          Export the portable project state
   ai-engine import <file>                          Import a previously exported state
@@ -59,8 +59,13 @@ function usage(): void {
 
 async function main(): Promise<number> {
   const { command, positional, flags } = parseArgs(process.argv.slice(2));
-  const repoPath = path.resolve(String(flags['repo'] ?? process.env['PROJECT_ROOT'] ?? process.cwd()));
+  // A repository is optional: an installation serves as many projects as are
+  // added to it from the cockpit, so `init` with none is the normal first step.
+  const repoFlag = flags['repo'] ?? process.env['PROJECT_ROOT'];
+  const repoPath = typeof repoFlag === 'string' && repoFlag.length > 0 ? path.resolve(repoFlag) : null;
   const installRoot = path.resolve(String(flags['install-root'] ?? process.env['INSTALL_ROOT'] ?? process.cwd()));
+  // Which project a command is about, when the installation serves several.
+  const project = typeof flags['project'] === 'string' ? flags['project'] : undefined;
 
   switch (command) {
     case 'init':
@@ -68,11 +73,11 @@ async function main(): Promise<number> {
     case 'version':
       return versionCommand();
     case 'start':
-      return startCommand(repoPath);
+      return startCommand(repoPath ?? installRoot);
     case 'stop':
-      return stopCommand(repoPath);
+      return stopCommand(repoPath ?? installRoot);
     case 'status':
-      return statusCommand(repoPath);
+      return statusCommand(repoPath ?? installRoot, { project });
     case 'story': {
       const sub = positional[0];
       if (sub !== 'create') {
@@ -84,11 +89,12 @@ async function main(): Promise<number> {
         ...(typeof flags['file'] === 'string' ? { file: flags['file'] } : {}),
         ...(typeof flags['title'] === 'string' ? { title: flags['title'] } : {}),
         installation: Boolean(flags['installation']),
+        project,
       });
     }
     case 'task': {
       const sub = positional[0];
-      if (sub === 'list') return taskListCommand();
+      if (sub === 'list') return taskListCommand({ project });
       if (sub === 'show' && positional[1]) return taskShowCommand(positional[1]);
       failure('Usage: ai-engine task list | ai-engine task show <taskId>');
       return 1;
@@ -99,7 +105,7 @@ async function main(): Promise<number> {
         failure('Usage: ai-engine export <file>');
         return 1;
       }
-      return exportCommand(path.resolve(target));
+      return exportCommand(path.resolve(target), { project });
     }
     case 'import': {
       const source = positional[0];
@@ -107,7 +113,7 @@ async function main(): Promise<number> {
         failure('Usage: ai-engine import <file>');
         return 1;
       }
-      return importCommand(path.resolve(source));
+      return importCommand(path.resolve(source), { project });
     }
     case 'update':
       info('\nUpdate from the cockpit: System Status shows an update button whenever the installation is');

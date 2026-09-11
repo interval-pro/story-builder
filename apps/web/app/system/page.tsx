@@ -1,25 +1,24 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
-import { api, type Task } from '../../lib/api';
-import { StateBadge } from '../../components/state-badge';
-import { formatTokens, formatUsd } from '../../lib/format';
+import { api, type UsageView } from '../../lib/api';
+import { Alert, Badge, Bar, Button, Card, Empty, ErrorText, KeyValue, Tile } from '../../components/ui';
+import { formatTokens, formatTokensExact, relativeAge } from '../../lib/format';
 
-interface Status {
-  project: { name: string; repoPath: string; defaultBranch: string; remoteUrl: string | null };
-  activeTasks: number;
-  tasks: Task[];
-  jobs: Record<string, number>;
-  conflicts: { id: string; resource: string; severity: string; description: string }[];
-  runtimeManifest: { version: number; validated: boolean; manifest: { project: { language: string[] }; test: { commands: string[] } } } | null;
-  knowledgeSnapshot: { sequence: number; gitCommit: string } | null;
-  repository: { defaultBranch: string; head: string | null; remoteUrl: string | null };
+interface Health {
+  status: string;
+  workspacesProblem?: string | null;
+  database: boolean;
+  sandboxManager: boolean;
+  agentEngine: string;
+  agentEngineReady: boolean;
+  claudeCliVersion: string | null;
+  model: string;
+  sandboxEnabled: boolean;
 }
 
 interface Version {
   installRoot: string;
-  projectRoot: string;
   tag: string | null;
   commit: string;
   localCommits: number;
@@ -28,22 +27,6 @@ interface Version {
   releaseUrl: string | null;
   state: 'up_to_date' | 'behind' | 'diverged' | 'unknown';
 }
-
-const VERSION_LABELS: Record<Version['state'], string> = {
-  up_to_date: 'up to date',
-  behind: 'update available',
-  diverged: 'changed locally',
-  unknown: 'unknown',
-};
-
-/** The version state is one of the two facts this page exists to show, so it
- *  carries a badge tone rather than receding into the detail lines. */
-const VERSION_TONES: Record<Version['state'], string> = {
-  up_to_date: 'done',
-  behind: 'attention',
-  diverged: 'attention',
-  unknown: 'waiting',
-};
 
 interface ApplyRecord {
   id: string;
@@ -55,44 +38,34 @@ interface ApplyRecord {
   finishedAt: string | null;
 }
 
-interface Health {
-  status: string;
-  database: boolean;
-  sandboxManager: boolean;
-  agentEngine: string;
-  agentEngineReady: boolean;
-  claudeCliVersion: string | null;
-  aiProvider: string;
-  model: string;
-  sandboxEnabled: boolean;
-}
+const VERSION_WORDS: Record<Version['state'], string> = {
+  up_to_date: 'Up to date',
+  behind: 'Update available',
+  diverged: 'Changed locally',
+  unknown: 'Unknown',
+};
 
-interface AgentSpend {
-  agentType: string;
-  runs: number;
-  costUsd: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheCreationTokens: number;
-  unrecordedRuns: number;
-  failedRuns: number;
-}
+const VERSION_TONES: Record<Version['state'], 'done' | 'waiting' | 'caution'> = {
+  up_to_date: 'done',
+  behind: 'caution',
+  diverged: 'caution',
+  unknown: 'waiting',
+};
 
-interface Spend {
-  windowHours: number;
-  since: string;
-  total: AgentSpend;
-  byAgent: AgentSpend[];
-}
-
+/**
+ * What is running, what it costs, and how far this installation has drifted.
+ *
+ * Nothing on this page is money. The account is a subscription with a weekly
+ * token limit, and the engine reports no limit field of any kind, so the budget
+ * shown is one the owner set and the page says so.
+ */
 export default function SystemPage() {
   const syncingRef = useRef(false);
-  const [status, setStatus] = useState<Status | null>(null);
-  const [spend, setSpend] = useState<Spend | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [version, setVersion] = useState<Version | null>(null);
   const [apply, setApply] = useState<ApplyRecord | null>(null);
+  const [usage, setUsage] = useState<UsageView | null>(null);
+  const [jobs, setJobs] = useState<Record<string, number>>({});
   const [syncing, setSyncing] = useState(false);
   const [unreachable, setUnreachable] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -100,18 +73,18 @@ export default function SystemPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [statusResult, healthResult, versionResult, applyResult, spendResult] = await Promise.all([
-          api.get<Status>('/api/system/status'),
+        const [healthResult, versionResult, applyResult, usageResult, jobResult] = await Promise.all([
           api.get<Health>('/api/health'),
           api.get<Version>('/api/system/version').catch(() => null),
           api.get<{ apply: ApplyRecord | null }>('/api/system/apply').catch(() => ({ apply: null })),
-          api.get<Spend>('/api/system/spend').catch(() => null),
+          api.get<UsageView>('/api/usage?windowHours=168').catch(() => null),
+          api.get<{ stats: Record<string, number> }>('/api/jobs').catch(() => ({ stats: {} })),
         ]);
-        setStatus(statusResult);
-        setSpend(spendResult);
         setHealth(healthResult);
         setVersion(versionResult);
         setApply(applyResult.apply);
+        setUsage(usageResult);
+        setJobs(jobResult.stats);
         setUnreachable(false);
         if (applyResult.apply?.status !== 'RUNNING') setSyncing(false);
         setError(null);
@@ -142,181 +115,188 @@ export default function SystemPage() {
     setSyncing(true);
     setUnreachable(false);
     try {
-      await api.post('/api/system/sync', {});
+      await api.post('/api/system/sync');
     } catch (syncError) {
       setSyncing(false);
       setError(syncError instanceof Error ? syncError.message : String(syncError));
     }
   }
 
-  if (error) return <p className="error">{error}</p>;
-  if (!status || !health) return <p className="empty">Reading the system status and the health check.</p>;
+  if (error) return <div className="page"><ErrorText>{error}</ErrorText></div>;
+  if (!health) return <div className="page">Reading the system.</div>;
 
   const applying = syncing || apply?.status === 'RUNNING';
+  const week = usage?.week;
 
   return (
-    <div>
-      <h2>System Status</h2>
-      <p className="subtitle">{status.project.name} · {status.project.repoPath}</p>
-
-      <div className="grid">
-        <div className="card">
-          <div className="card-label">Services</div>
-          <div className="card-value">Database: {health.database ? 'up' : 'down'}</div>
-          <div className="card-detail">Sandbox manager: {health.sandboxManager ? 'up' : 'down'}</div>
-          <div className="card-detail">Sandboxing: {health.sandboxEnabled ? 'docker' : 'host worktrees'}</div>
-        </div>
-        <div className="card">
-          <div className="card-label">Agent engine</div>
-          <div className="card-value">{health.agentEngine}</div>
-          <div className="card-detail">{health.agentEngineReady ? health.claudeCliVersion ?? 'ready' : 'not available'}</div>
-          <div className="card-detail">{health.model}</div>
-        </div>
-        <div className="card">
-          <div className="card-label">Installation</div>
-          <div className="card-value">{version ? version.tag ?? version.commit.slice(0, 10) : 'unknown'}</div>
-          {version ? (
-            <div className="row">
-              <span className={`badge ${VERSION_TONES[version.state]}`}>{VERSION_LABELS[version.state]}</span>
-            </div>
-          ) : null}
-          <div className="card-detail">
-            {version?.state === 'behind' ? `latest release ${version.latestRelease}` : null}
-            {version?.state === 'diverged'
-              ? `${version.localCommits} local commit(s)${version.dirty ? ' and uncommitted changes' : ''}`
-              : null}
-            {version?.state === 'up_to_date' ? `matches ${version.latestRelease}` : null}
-          </div>
-          <div className="card-detail">{version?.installRoot ?? ''}</div>
-          {applying || version?.state === 'behind' ? (
-            <div className="actions">
-              {applying ? (
-                <span className="card-detail">
-                  {unreachable ? 'The system is restarting. This page will come back on its own.' : `Updating: ${apply?.step ?? 'starting'}`}
-                </span>
-              ) : null}
-              {!applying && version?.state === 'behind' ? (
-                <button onClick={() => void sync()}>Update to {version.latestRelease}</button>
-              ) : null}
-            </div>
-          ) : null}
-          {!applying && apply && apply.source === 'UPSTREAM' && apply.status !== 'SUCCEEDED' ? (
-            <p className="error">
-              The last update did not finish and the previous version was restored.{' '}
-              {apply.log.trim().split('\n').slice(-1)[0]}
-            </p>
-          ) : null}
-        </div>
-        <div className="card">
-          <div className="card-label">Repository</div>
-          <div className="card-value">{status.repository.defaultBranch}</div>
-          <div className="card-detail">{status.repository.head?.slice(0, 10) ?? 'unknown'}</div>
-          <div className="card-detail">{status.repository.remoteUrl ?? 'no remote'}</div>
-        </div>
-        <div className="card">
-          <div className="card-label">Runtime manifest</div>
-          <div className="card-value">{status.runtimeManifest ? `v${status.runtimeManifest.version}` : 'none'}</div>
-          <div className="card-detail">
-            {status.runtimeManifest?.manifest.project.language.join(', ') || 'no language detected'}
-          </div>
-          <div className="card-detail">{status.runtimeManifest?.validated ? 'validated' : 'not validated'}</div>
-        </div>
-        <div className="card">
-          <div className="card-label">Knowledge</div>
-          <div className="card-value">{status.knowledgeSnapshot ? `snapshot ${status.knowledgeSnapshot.sequence}` : 'none'}</div>
-          <div className="card-detail">{status.knowledgeSnapshot?.gitCommit.slice(0, 10) ?? ''}</div>
-        </div>
-        <div className="card">
-          <div className="card-label">
-            Spend, last {spend ? spend.windowHours : 5} hours
-          </div>
-          <div className="card-value">{spend ? formatUsd(spend.total.costUsd) : 'unknown'}</div>
-          {spend ? (
-            <>
-              <div className="card-detail">
-                {spend.total.runs} run(s) · {formatTokens(spend.total.inputTokens)} in ·{' '}
-                {formatTokens(spend.total.outputTokens)} out · {formatTokens(spend.total.cacheReadTokens)} cache read
-              </div>
-              {spend.byAgent.map((agent) => (
-                <div key={agent.agentType} className="card-detail">
-                  {agent.agentType}: {agent.unrecordedRuns === agent.runs ? 'not recorded' : formatUsd(agent.costUsd)} over{' '}
-                  {agent.runs} run(s)
-                  {agent.failedRuns > 0 ? `, ${agent.failedRuns} of them failed` : ''}
-                </div>
-              ))}
-              {spend.total.unrecordedRuns > 0 ? (
-                <div className="card-detail">{spend.total.unrecordedRuns} run(s) recorded no cost, so this total is partial.</div>
-              ) : null}
-              {spend.total.failedRuns > 0 ? (
-                <div className="card-detail">
-                  {spend.total.failedRuns} run(s) failed and are counted here. A run that burned tokens before it failed
-                  still cost what it cost.
-                </div>
-              ) : null}
-              <div className="card-detail">
-                Cost per run is measured: it is the figure the engine itself reports. This total is derived by summing
-                the runs recorded in the window. It is not an account limit, which the engine does not report here.
-              </div>
-            </>
-          ) : (
-            <div className="card-detail">No spend has been recorded yet.</div>
-          )}
-        </div>
-        <div className="card">
-          <div className="card-label">Jobs</div>
-          {Object.entries(status.jobs).length === 0 ? (
-            <div className="card-value">idle</div>
-          ) : (
-            Object.entries(status.jobs).map(([key, value]) => (
-              <div key={key} className="card-value">
-                {key}: {value}
-              </div>
-            ))
-          )}
-        </div>
+    <div className="page enter">
+      <div>
+        <h1 className="display">System</h1>
+        <p className="standfirst">
+          What is running, what the agents have used, and how far this installation has drifted from the released
+          version.
+        </p>
       </div>
 
-      <h3>Active tasks ({status.activeTasks})</h3>
-      {status.tasks.length === 0 ? (
-        <p className="empty">Nothing is running.</p>
-      ) : (
-        <div className="table-scroll">
-          <table>
-            <tbody>
-              {status.tasks.map((task) => (
-                <tr key={task.id}>
-                  <td className="col-lg">
-                    <Link href={`/tasks/${task.id}`}>{task.branchName}</Link>
-                  </td>
-                  <td className="col-lg">
-                    <StateBadge state={task.state} />
-                  </td>
-                  <td className="meta">{task.baseCommit.slice(0, 10)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <div className="tiles">
+        <Tile value={health.database ? 'Up' : 'Down'} label="Database" tone={health.database ? 'positive' : 'attention'} />
+        <Tile
+          value={health.agentEngineReady ? 'Ready' : 'Missing'}
+          label="Agent engine"
+          tone={health.agentEngineReady ? 'positive' : 'attention'}
+        />
+        <Tile value={Object.values(jobs).reduce((total, count) => total + count, 0)} label="Jobs on record" />
+        <Tile value={week ? formatTokens(week.usedTokens) : '—'} label="Tokens this week" />
+      </div>
 
-      {status.conflicts.length > 0 ? (
-        <>
-          <h3>Open conflicts</h3>
-          <div className="table-scroll">
-            <table>
-              <tbody>
-                {status.conflicts.map((conflict) => (
-                  <tr key={conflict.id}>
-                    <td className="col-sm">{conflict.severity}</td>
-                    <td className="col-lg">{conflict.resource}</td>
-                    <td>{conflict.description}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
+      {health.workspacesProblem ? (
+        <Alert tone="critical" title="Worktrees are in a place the agents cannot write to">
+          {health.workspacesProblem}
+        </Alert>
       ) : null}
+
+      {!health.agentEngineReady ? (
+        <Alert tone="critical" title="The engine is not available">
+          The Claude Code CLI could not be run. Nothing can happen until it is installed and logged in.
+        </Alert>
+      ) : null}
+
+      <div className="split">
+        <div className="wide stack">
+          <Card>
+            <span className="meta">Installation</span>
+            <div className="row-between">
+              <h2 className="subhead">{version ? (version.tag ?? version.commit.slice(0, 10)) : 'unknown'}</h2>
+              {version ? <Badge tone={VERSION_TONES[version.state]}>{VERSION_WORDS[version.state]}</Badge> : null}
+            </div>
+            {version?.state === 'behind' ? (
+              <span className="body-sm">The newest release is {version.latestRelease}.</span>
+            ) : null}
+            {version?.state === 'diverged' ? (
+              <span className="body-sm">
+                {version.localCommits} local commit(s)
+                {version.dirty ? ' and uncommitted changes' : ''}. An update would merge rather than fast-forward.
+              </span>
+            ) : null}
+            {version?.state === 'up_to_date' ? (
+              <span className="body-sm">This matches {version.latestRelease} exactly.</span>
+            ) : null}
+            <div className="mono">{version?.installRoot}</div>
+
+            {applying ? (
+              <>
+                <span className="meta">
+                  {unreachable
+                    ? 'The system is restarting. This page comes back on its own.'
+                    : `Updating: ${apply?.step ?? 'starting'}`}
+                </span>
+                <Bar percent={60} tone="caution" />
+              </>
+            ) : version?.state === 'behind' ? (
+              <div className="row">
+                <Button onClick={() => void sync()}>Update to {version.latestRelease}</Button>
+                <span className="meta">Stops everything, rebuilds, then starts again</span>
+              </div>
+            ) : null}
+
+            {!applying && apply && apply.status !== 'SUCCEEDED' ? (
+              <ErrorText>
+                The last {apply.source === 'UPSTREAM' ? 'update' : 'apply'} did not finish and the previous version was
+                restored. {apply.log.trim().split('\n').slice(-1)[0]}
+              </ErrorText>
+            ) : null}
+            {!applying && apply?.status === 'SUCCEEDED' ? (
+              <span className="meta">
+                Last applied {relativeAge(apply.finishedAt)} · {apply.candidateRef}
+              </span>
+            ) : null}
+          </Card>
+
+          {usage ? (
+            <Card>
+              <span className="meta">Usage, last seven days, every project</span>
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Agent</th>
+                      <th>Runs</th>
+                      <th>Tokens</th>
+                      <th>Nothing recorded</th>
+                      <th>Failed</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usage.window.byAgent.map((agent) => (
+                      <tr key={agent.agentType}>
+                        <td>{agent.agentType}</td>
+                        <td className="num">{agent.runs}</td>
+                        <td className="num">{formatTokensExact(agent.totalTokens)}</td>
+                        <td className="num">{agent.unrecordedRuns}</td>
+                        <td className="num">{agent.failedRuns}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <span className="body-sm">{usage.provenance.perRun}. {usage.provenance.window}.</span>
+            </Card>
+          ) : (
+            <Empty>No usage has been recorded yet.</Empty>
+          )}
+        </div>
+
+        <div className="narrow stack">
+          <Card tone="olive">
+            <span className="meta" style={{ color: 'rgba(242,229,200,0.82)' }}>
+              The week
+            </span>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 52, lineHeight: 0.95 }}>
+              {week ? formatTokens(week.usedTokens) : '—'}
+            </div>
+            <span className="meta" style={{ color: 'rgba(242,229,200,0.82)' }}>
+              Tokens, rolling seven days
+            </span>
+            {week?.budgetTokens ? (
+              <>
+                <Bar percent={week.percentOfBudget ?? 0} tone={(week.percentOfBudget ?? 0) > 80 ? 'critical' : undefined} />
+                <span className="body-sm" style={{ color: 'rgba(242,229,200,0.82)' }}>
+                  {week.percentOfBudget}% of the budget you set.
+                </span>
+              </>
+            ) : null}
+            <span className="body-sm" style={{ color: 'rgba(242,229,200,0.82)' }}>
+              {usage?.provenance.limit}
+            </span>
+            {week?.reportedLimit ? (
+              <div className="mono">{JSON.stringify(week.reportedLimit).slice(0, 300)}</div>
+            ) : null}
+          </Card>
+
+          <Card>
+            <span className="meta">Services</span>
+            <KeyValue label="Database">{health.database ? 'up' : 'down'}</KeyValue>
+            <KeyValue label="Sandbox manager">{health.sandboxManager ? 'up' : 'not running'}</KeyValue>
+            <KeyValue label="Sandboxing">{health.sandboxEnabled ? 'docker' : 'host worktrees'}</KeyValue>
+            <KeyValue label="Engine">{health.agentEngine}</KeyValue>
+            <KeyValue label="CLI">{health.claudeCliVersion ?? 'unknown'}</KeyValue>
+            <KeyValue label="Model">{health.model}</KeyValue>
+          </Card>
+
+          <Card>
+            <span className="meta">Jobs on record</span>
+            {Object.keys(jobs).length === 0 ? (
+              <Empty>None.</Empty>
+            ) : (
+              Object.entries(jobs).map(([status, count]) => (
+                <KeyValue key={status} label={status.toLowerCase()}>
+                  {count}
+                </KeyValue>
+              ))
+            )}
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }

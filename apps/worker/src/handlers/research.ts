@@ -125,6 +125,7 @@ async function runResearchPhase(
   const previousSessionId = await resumableSessionFor(context, 'RESEARCH');
   const researchRun = await context.repos.runs.start({
     taskId: context.task.id,
+    projectId: context.project.id,
     phase: 'RESEARCH',
     agentType: 'research',
     agentVersionId: researchVersionId,
@@ -262,6 +263,7 @@ export async function generateReview(
 
   const reviewRun = await context.repos.runs.start({
     taskId: context.task.id,
+    projectId: context.project.id,
     phase: 'REVIEW',
     agentType: 'review',
     agentVersionId: reviewVersionId,
@@ -321,6 +323,16 @@ export async function generateReview(
       document,
       markdown: renderReviewMarkdown(document),
       generatedByRunId: reviewRun.id,
+    });
+
+    // The decisions become rows, which is what lets the approval gate on them.
+    // An answer already given for the same key is carried onto this version
+    // rather than asked again: a regeneration about something else must not
+    // reopen a question a person has already settled.
+    await context.repos.reviewDecisions.replaceForVersion({
+      taskId: context.task.id,
+      reviewVersionId: version.id,
+      decisions: document.decisions,
     });
 
     if (input.previousReview) {

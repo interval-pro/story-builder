@@ -3,9 +3,9 @@ import type { ExecutionPhase, TaskCheckpoint, TaskRun, ToolCall } from '@ai-engi
 import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
 
-const RUN_COLUMNS = `id, task_id, phase, agent_type, agent_version_id, status, started_at, finished_at,
-  input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, model_usage,
-  subagent_stats, session_id, resumed, effort, model, error_message`;
+const RUN_COLUMNS = `id, task_id, project_id, kind, subject_id, phase, agent_type, agent_version_id, status,
+  started_at, finished_at, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd,
+  model_usage, subagent_stats, session_id, resumed, effort, model, error_message`;
 
 /** What a finished run spent. Anything omitted leaves the stored value alone. */
 export interface RunCompletion {
@@ -23,18 +23,24 @@ export interface RunCompletion {
   model?: string | null;
 }
 
-/** One agent's spend inside a time window. */
-export interface AgentSpend {
+/**
+ * One agent's usage inside a time window, in tokens.
+ *
+ * There is no money here on purpose. The engine reports a cost and the column
+ * keeps it, because discarding a measurement cannot be undone, but the account
+ * this runs on is a subscription with a weekly token limit, so a dollar figure
+ * answers a question nobody is asking and invites reading it as the bill.
+ */
+export interface AgentUsage {
   agentType: string;
   runs: number;
-  costUsd: number;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
-  /** Runs in the window whose cost was never recorded, so the sum is partial. */
+  /** Runs in the window that recorded nothing, so the sum is partial. */
   unrecordedRuns: number;
-  /** Runs in the window that failed. Their spend is counted, not hidden. */
+  /** Runs in the window that failed. What they spent is counted, not hidden. */
   failedRuns: number;
 }
 
@@ -42,7 +48,12 @@ export class TaskRunRepository {
   constructor(private readonly db: Queryable) {}
 
   async start(input: {
-    taskId: string;
+    /** Null for work that is not a task: an idea intake or a chat turn. */
+    taskId?: string | null;
+    projectId: string;
+    kind?: TaskRun['kind'];
+    /** The idea session or chat session, when this is not a task run. */
+    subjectId?: string | null;
     phase: ExecutionPhase;
     agentType: string;
     agentVersionId?: string | null;
@@ -55,11 +66,15 @@ export class TaskRunRepository {
     resumed?: boolean | null;
   }): Promise<TaskRun> {
     const row = await this.db.queryOne(
-      `INSERT INTO task_runs (id, task_id, phase, agent_type, agent_version_id, session_id, resumed)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${RUN_COLUMNS}`,
+      `INSERT INTO task_runs (id, task_id, project_id, kind, subject_id, phase, agent_type, agent_version_id,
+         session_id, resumed)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING ${RUN_COLUMNS}`,
       [
         newId(),
-        input.taskId,
+        input.taskId ?? null,
+        input.projectId,
+        input.kind ?? 'TASK',
+        input.subjectId ?? null,
         input.phase,
         input.agentType,
         input.agentVersionId ?? null,
@@ -172,24 +187,25 @@ export class TaskRunRepository {
   }
 
   /**
-   * What each agent spent on runs that finished inside the window. task_runs has
-   * no project_id, so the scope comes from the join; the partial index on
-   * finished_at covers the time filter, which is keyed on finished_at and not on
-   * status, so widening this past COMPLETED costs nothing.
+   * What each agent used on runs that finished inside the window, in tokens.
+   *
+   * The scope is the run's own project rather than a join through tasks, because
+   * an idea intake and a chat turn have no task and would otherwise be missing
+   * from the only figure that says how much of the week is gone. Passing null
+   * counts every project, which is what the account limit actually applies to.
    *
    * Failed runs are counted. A run that burned thirty thousand output tokens and
-   * then failed is spend, and leaving it out was the single largest way this
+   * then failed is usage, and leaving it out was the single largest way this
    * figure understated what the agents cost.
    *
    * Every aggregate is cast to text and converted here, as the metrics summary
    * does: SUM over an INTEGER column is a bigint, which node-postgres returns as
    * a string that would concatenate rather than add.
    */
-  async spendSince(projectId: string, since: Date): Promise<AgentSpend[]> {
+  async usageSince(projectId: string | null, since: Date): Promise<AgentUsage[]> {
     const rows = await this.db.query<{
       agent_type: string;
       runs: string;
-      cost_usd: string;
       input_tokens: string;
       output_tokens: string;
       cache_read_tokens: string;
@@ -199,16 +215,16 @@ export class TaskRunRepository {
     }>(
       `SELECT r.agent_type,
               COUNT(*)::text AS runs,
-              COALESCE(SUM(r.cost_usd), 0)::text AS cost_usd,
               COALESCE(SUM(r.input_tokens), 0)::text AS input_tokens,
               COALESCE(SUM(r.output_tokens), 0)::text AS output_tokens,
               COALESCE(SUM(r.cache_read_tokens), 0)::text AS cache_read_tokens,
               COALESCE(SUM(r.cache_creation_tokens), 0)::text AS cache_creation_tokens,
-              (COUNT(*) FILTER (WHERE r.cost_usd IS NULL))::text AS unrecorded_runs,
+              (COUNT(*) FILTER (WHERE r.input_tokens IS NULL AND r.output_tokens IS NULL))::text AS unrecorded_runs,
               (COUNT(*) FILTER (WHERE r.status = 'FAILED'))::text AS failed_runs
          FROM task_runs r
-         JOIN tasks t ON t.id = r.task_id
-        WHERE t.project_id = $1 AND r.status IN ('COMPLETED', 'FAILED') AND r.finished_at >= $2
+        WHERE ($1::uuid IS NULL OR r.project_id = $1::uuid)
+          AND r.status IN ('COMPLETED', 'FAILED')
+          AND r.finished_at >= $2
         GROUP BY r.agent_type
         ORDER BY r.agent_type`,
       [projectId, since.toISOString()],
@@ -216,7 +232,6 @@ export class TaskRunRepository {
     return rows.map((row) => ({
       agentType: row.agent_type,
       runs: Number(row.runs),
-      costUsd: Number(row.cost_usd),
       inputTokens: Number(row.input_tokens),
       outputTokens: Number(row.output_tokens),
       cacheReadTokens: Number(row.cache_read_tokens),
@@ -224,6 +239,15 @@ export class TaskRunRepository {
       unrecordedRuns: Number(row.unrecorded_runs),
       failedRuns: Number(row.failed_runs),
     }));
+  }
+
+  /** Every run of one idea session or chat session, newest last. */
+  async listBySubject(subjectId: string): Promise<TaskRun[]> {
+    return camelizeAll<TaskRun>(
+      await this.db.query(`SELECT ${RUN_COLUMNS} FROM task_runs WHERE subject_id = $1 ORDER BY started_at ASC`, [
+        subjectId,
+      ]),
+    );
   }
 
   /** Marks runs that were interrupted by a crash so the UI never shows them as live. */

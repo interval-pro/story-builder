@@ -1,10 +1,11 @@
-import { HttpRouter, loadConfig, RESPONSE_HANDLED, ValidationError } from '@ai-engine/shared';
+import { homedir } from 'node:os';
+import { HttpRouter, loadConfig, RESPONSE_HANDLED, ValidationError, workspacesRootProblem } from '@ai-engine/shared';
 import { GitClient, readInstallationVersion } from '@ai-engine/git';
 import { fetchLatestRelease } from '@ai-engine/github';
 import { assertCanApply, startApply } from '../apply';
 import { claudeCliAvailable } from '@ai-engine/claude-code';
 import { checkBaseDrift } from '@ai-engine/conflict-engine';
-import { primaryProjectId, type ApiContext } from '../context';
+import { resolveProjectId, type ApiContext } from '../context';
 
 /** System status, artifacts, conflicts and metrics. */
 export function registerSystemRoutes(router: HttpRouter, context: ApiContext): void {
@@ -21,8 +22,14 @@ export function registerSystemRoutes(router: HttpRouter, context: ApiContext): v
     const engine = config.agents.engine;
     const cli = engine === 'claude-code' ? await claudeCliAvailable(config.agents.claudeBinary) : { available: true, version: null };
 
+    // A worktree root the agent cannot write to is the most expensive
+    // misconfiguration in this system: everything looks healthy, the agents run,
+    // and every one of them reports that it implemented nothing.
+    const workspaces = workspacesRootProblem(config.paths.workspacesRoot, homedir());
+
     return {
-      status: 'ok',
+      status: workspaces ? 'misconfigured' : 'ok',
+      workspacesProblem: workspaces,
       database: await context.db.healthy(),
       sandboxManager,
       agentEngine: engine,
@@ -46,8 +53,6 @@ export function registerSystemRoutes(router: HttpRouter, context: ApiContext): v
       ...version,
     };
   });
-
-  router.get('/api/projects', async () => ({ projects: await context.repos.projects.list() }));
 
   /**
    * Moves this installation to the newest release. The candidate is a tag
@@ -92,7 +97,7 @@ export function registerSystemRoutes(router: HttpRouter, context: ApiContext): v
   });
 
   router.get('/api/system/status', async ({ query }) => {
-    const projectId = await primaryProjectId(context, query.get('projectId'));
+    const projectId = await resolveProjectId(context, query.get('projectId'));
     const project = await context.repos.projects.getById(projectId);
     const active = await context.repos.tasks.listActive(projectId);
     const jobs = await context.queue.stats();
@@ -116,68 +121,14 @@ export function registerSystemRoutes(router: HttpRouter, context: ApiContext): v
   });
 
   router.get('/api/system/events', async ({ query }) => {
-    const projectId = await primaryProjectId(context, query.get('projectId'));
+    const projectId = await resolveProjectId(context, query.get('projectId'));
     const limit = Number.parseInt(query.get('limit') ?? '100', 10);
     return { events: await context.events.listByProject(projectId, limit) };
   });
 
   router.get('/api/system/metrics', async ({ query }) => {
-    const projectId = await primaryProjectId(context, query.get('projectId'));
+    const projectId = await resolveProjectId(context, query.get('projectId'));
     return { metrics: await context.repos.metrics.summary(projectId) };
-  });
-
-  /**
-   * What the agents have spent in a rolling window.
-   *
-   * Per-run cost is measured: it is the CLI's own total_cost_usd, read from the
-   * result payload rather than computed from tokens and a price table. The window
-   * total is derived: it is our sum of those measured costs over a range we
-   * chose. The payload carries no rate-limit field of any kind, so nothing here
-   * reports the account's own limit.
-   *
-   * Runs that failed are counted here alongside the ones that finished, and are
-   * reported separately as failedRuns. A run that burned tokens and then failed
-   * is spend; leaving it out made this figure lower than the bill. Any number
-   * saved from before that change will not line up with one taken after it.
-   */
-  router.get('/api/system/spend', async ({ query }) => {
-    const projectId = await primaryProjectId(context, query.get('projectId'));
-    const requested = Number.parseFloat(query.get('windowHours') ?? '');
-    const windowHours = Number.isFinite(requested) && requested > 0 ? requested : 5;
-    const since = new Date(Date.now() - windowHours * 3_600_000);
-
-    const byAgent = await context.repos.runs.spendSince(projectId, since);
-    const total = byAgent.reduce(
-      (sum, agent) => ({
-        runs: sum.runs + agent.runs,
-        costUsd: sum.costUsd + agent.costUsd,
-        inputTokens: sum.inputTokens + agent.inputTokens,
-        outputTokens: sum.outputTokens + agent.outputTokens,
-        cacheReadTokens: sum.cacheReadTokens + agent.cacheReadTokens,
-        cacheCreationTokens: sum.cacheCreationTokens + agent.cacheCreationTokens,
-        unrecordedRuns: sum.unrecordedRuns + agent.unrecordedRuns,
-        failedRuns: sum.failedRuns + agent.failedRuns,
-      }),
-      {
-        runs: 0,
-        costUsd: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheReadTokens: 0,
-        cacheCreationTokens: 0,
-        unrecordedRuns: 0,
-        failedRuns: 0,
-      },
-    );
-
-    return {
-      windowHours,
-      since: since.toISOString(),
-      until: new Date().toISOString(),
-      total,
-      byAgent,
-      costProvenance: { perRun: 'measured', window: 'derived' },
-    };
   });
 
   router.get('/api/conflicts', async () => ({ conflicts: await context.conflicts.allOpenConflicts() }));
@@ -211,12 +162,4 @@ export function registerSystemRoutes(router: HttpRouter, context: ApiContext): v
 
   router.get('/api/jobs', async () => ({ stats: await context.queue.stats() }));
 
-  router.post('/api/system/knowledge-refresh', async ({ query }) => {
-    const projectId = await primaryProjectId(context, query.get('projectId'));
-    const tasks = await context.repos.tasks.listByProject(projectId, 1);
-    const anchor = tasks[0];
-    if (!anchor) return { queued: false, reason: 'No task exists yet to anchor the refresh job' };
-    const job = await context.queue.enqueue({ taskId: anchor.id, jobType: 'KNOWLEDGE_REFRESH', payload: { taskId: anchor.id } });
-    return { queued: Boolean(job), job };
-  });
 }

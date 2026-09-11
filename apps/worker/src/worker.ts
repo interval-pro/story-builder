@@ -1,6 +1,6 @@
 import { createLogger, loadConfig, newId, sleep, type Logger } from '@ai-engine/shared';
-import type { Job, JobType } from '@ai-engine/domain';
-import { Database } from '@ai-engine/db';
+import { isProjectJob, type Job, type JobType } from '@ai-engine/domain';
+import { createRepositories, Database, type Repositories } from '@ai-engine/db';
 import { JobQueue } from '@ai-engine/queue';
 import { buildJobContext } from './job-context';
 import { handleResearch } from './handlers/research';
@@ -15,6 +15,10 @@ import {
   handleRuntimeManifest,
   handleSandboxTeardown,
 } from './handlers/maintenance';
+import { handleProjectSetup } from './handlers/project-setup';
+import { handleIdeaIntake } from './handlers/intake';
+import { handleChatTurn } from './handlers/chat';
+import { buildProjectJobContext } from './project-context';
 
 export interface WorkerOptions {
   db: Database;
@@ -31,6 +35,12 @@ export interface WorkerOptions {
 export class Worker {
   private readonly db: Database;
   private readonly queue: JobQueue;
+  /**
+   * Held for the life of the worker rather than rebuilt per poll, so the settings
+   * cache is actually a cache. A fresh instance every second meant every loop
+   * queried the table once a second for a value that changes twice a day.
+   */
+  private readonly repos: Repositories;
   private readonly logger: Logger;
   readonly workerId: string;
   private running = false;
@@ -38,12 +48,21 @@ export class Worker {
   constructor(private readonly options: WorkerOptions) {
     this.db = options.db;
     this.queue = new JobQueue(options.db);
+    this.repos = createRepositories(options.db);
     this.workerId = options.workerId ?? `worker-${newId().slice(0, 8)}`;
     this.logger = (options.logger ?? createLogger('worker')).child({ workerId: this.workerId });
   }
 
   async runOnce(): Promise<Job | null> {
-    const job = await this.queue.claim(this.workerId, this.options.jobTypes);
+    // Read on every poll rather than at startup: the owner changes these from
+    // the cockpit, and a number that only takes effect after a restart is not
+    // the setting they thought they changed.
+    const policy = await this.repos.settings.queuePolicy();
+    const job = await this.queue.claim(this.workerId, {
+      ...(this.options.jobTypes ? { jobTypes: this.options.jobTypes } : {}),
+      concurrency: policy.concurrency,
+      paused: policy.paused,
+    });
     if (!job) return null;
 
     const logger = this.logger.child({ jobId: job.id, jobType: job.jobType });
@@ -73,6 +92,31 @@ export class Worker {
   }
 
   private async dispatch(job: Job): Promise<void> {
+    // Work that belongs to a project rather than to one of its tasks: preparing a
+    // newly added project, refreshing its knowledge, turning an idea into stories.
+    // These have no task, no branch and no worktree, so they get a context that
+    // does not pretend otherwise.
+    if (isProjectJob(job.jobType) || job.jobType === 'CHAT_TURN') {
+      const projectContext = await buildProjectJobContext({
+        db: this.db,
+        job,
+        workerId: this.workerId,
+        logger: this.logger,
+      });
+      switch (job.jobType) {
+        case 'PROJECT_SETUP':
+          return handleProjectSetup(projectContext);
+        case 'KNOWLEDGE_REFRESH':
+          return handleKnowledgeRefresh(projectContext);
+        case 'IDEA_INTAKE':
+          return handleIdeaIntake(projectContext);
+        case 'CHAT_TURN':
+          return handleChatTurn(projectContext);
+        default:
+          throw new Error(`Unknown project job type: ${job.jobType}`);
+      }
+    }
+
     const taskId = String(job.payload['taskId'] ?? job.taskId ?? '');
     if (!taskId) throw new Error(`Job ${job.id} has no task`);
 
@@ -99,8 +143,6 @@ export class Worker {
         return handlePushAndPullRequest(context);
       case 'LEARNING':
         return handleLearning(context);
-      case 'KNOWLEDGE_REFRESH':
-        return handleKnowledgeRefresh(context);
       case 'RUNTIME_MANIFEST':
         return handleRuntimeManifest(context);
       case 'SANDBOX_TEARDOWN':

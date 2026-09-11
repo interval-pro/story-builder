@@ -6,6 +6,12 @@ import { registerTaskRoutes } from './routes/tasks';
 import { registerReviewRoutes } from './routes/reviews';
 import { registerBrainRoutes } from './routes/brain';
 import { registerSystemRoutes } from './routes/system';
+import { registerProjectRoutes } from './routes/projects';
+import { registerQueueRoutes } from './routes/queue';
+import { registerIdeaRoutes } from './routes/ideas';
+import { registerChatRoutes } from './routes/chat';
+import { registerSettingsRoutes } from './routes/settings';
+import { registerUsageRoutes } from './routes/usage';
 
 const logger = createLogger('api-service');
 
@@ -16,6 +22,12 @@ async function main(): Promise<void> {
   const router = new HttpRouter('api', logger);
 
   registerSystemRoutes(router, context);
+  registerProjectRoutes(router, context);
+  registerSettingsRoutes(router, context);
+  registerQueueRoutes(router, context);
+  registerUsageRoutes(router, context);
+  registerIdeaRoutes(router, context);
+  registerChatRoutes(router, context);
   registerStoryRoutes(router, context);
   registerTaskRoutes(router, context);
   registerReviewRoutes(router, context);

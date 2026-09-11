@@ -22,7 +22,7 @@ import { GitClient } from '@ai-engine/git';
 import { SecretsService } from '@ai-engine/security';
 import { ProjectBrain } from '@ai-engine/project-brain';
 import { KnowledgeService } from '@ai-engine/project-knowledge';
-import { BuiltinAgentRunner, type AgentRunner, type ProjectContext } from '@ai-engine/agents';
+import { BuiltinAgentRunner, type AgentRunner, type AgentType, type ProjectContext } from '@ai-engine/agents';
 import { Orchestrator } from '@ai-engine/orchestrator';
 
 export interface JobContext {
@@ -197,7 +197,7 @@ export async function createToolEnvironment(input: {
 /** Registers the agent prompt as a version so runs stay reproducible. */
 export async function resolveAgentVersion(
   context: JobContext,
-  type: 'research' | 'review' | 'implementation' | 'qa' | 'learning',
+  type: AgentType,
   prompt: string,
 ): Promise<string> {
   const config = loadConfig();
@@ -316,7 +316,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * discarded. A timeout has nothing to attach and returns null, so the run keeps
  * whatever was recorded when it started.
  */
-function runFailureSpend(error: unknown): RunCompletion | undefined {
+export function failRunSpend(error: unknown): RunCompletion | undefined {
   const details = error instanceof AppError ? error.details : undefined;
   if (!details) return undefined;
 
@@ -359,7 +359,7 @@ function runFailureSpend(error: unknown): RunCompletion | undefined {
  */
 export async function failRun(context: JobContext, runId: string, error: unknown): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
-  const spend = runFailureSpend(error);
+  const spend = failRunSpend(error);
   await context.repos.runs.fail(runId, message, spend);
 }
 

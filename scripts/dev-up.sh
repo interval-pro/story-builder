@@ -9,7 +9,7 @@ ROOT="$(pwd)"
 ENV_FILE="${ENV_FILE:-.env.local}"
 
 if [ ! -f "$ENV_FILE" ]; then
-  echo "Missing $ENV_FILE. Run ./install.sh --repo <path> or copy .env.example." >&2
+  echo "Missing $ENV_FILE. Run ./install.sh or copy .env.example." >&2
   exit 1
 fi
 
@@ -27,9 +27,30 @@ PG_CONTAINER="${PG_CONTAINER:-ai-engine-postgres}"
 PG_PORT="${PG_PORT:-5433}"
 mkdir -p "$WORKSPACES_ROOT" "$ARTIFACTS_ROOT" .run
 
-if [ -z "${PROJECT_ROOT:-}" ]; then
-  echo "PROJECT_ROOT is not set in $ENV_FILE. The installation does not know which repository to work on." >&2
-  exit 1
+# An env file written by an older installer is missing keys this script and the
+# services now rely on, and the defaults above only live for this shell. Writing
+# the resolved values back is what stops the next thing that reads the file —
+# the cockpit build, a migration, a detached apply — from resolving them
+# differently. Only missing keys are added; anything already set is left alone.
+ensure_env() {
+  local key="$1" value="$2"
+  if ! grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+    printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+    echo "-> added $key to $ENV_FILE"
+  fi
+}
+ensure_env INSTALL_ROOT "$INSTALL_ROOT"
+ensure_env STATE_ROOT "$STATE_ROOT"
+ensure_env WORKSPACES_ROOT "$WORKSPACES_ROOT"
+ensure_env ARTIFACTS_ROOT "$ARTIFACTS_ROOT"
+ensure_env PG_CONTAINER "$PG_CONTAINER"
+ensure_env PG_PORT "$PG_PORT"
+
+# PROJECT_ROOT is no longer required: an installation serves as many projects as
+# you add to it from the cockpit, and it is perfectly normal to start one with
+# none. It is still honoured when set, so an older env file keeps working.
+if [ -n "${PROJECT_ROOT:-}" ]; then
+  echo "-> Project root $PROJECT_ROOT"
 fi
 
 echo "-> Postgres"
@@ -119,7 +140,7 @@ if ! curl -sf "${API_BASE_URL:-http://localhost:4000}/api/health" >/dev/null 2>&
 fi
 
 echo
-echo "Project:  $PROJECT_ROOT"
 echo "Cockpit: http://localhost:3000"
+echo "Add the projects you want worked on from there."
 curl -s "${API_BASE_URL:-http://localhost:4000}/api/health"
 echo

@@ -1,5 +1,13 @@
 import { AppError } from '@ai-engine/shared';
-import { classifyTaskSize, type QaFinding } from '@ai-engine/domain';
+import {
+  carryOpenFindings,
+  classifyTaskSize,
+  collectQaNotes,
+  SETTING_KEYS,
+  type QaFinding,
+  type QaNote,
+  type ReviewDocument,
+} from '@ai-engine/domain';
 import { loadAgentPrompt, runImplementationAgent } from '@ai-engine/agents';
 import { ConflictEngine } from '@ai-engine/conflict-engine';
 import { changedFiles, GitClient } from '@ai-engine/git';
@@ -34,11 +42,54 @@ async function lastImplementationSession(context: JobContext): Promise<string | 
   return typeof sessionId === 'string' && sessionId.length > 0 ? sessionId : null;
 }
 
-/** Findings the QA agent raised in the previous iteration and are still open. */
-async function openQaFindings(context: JobContext): Promise<QaFinding[]> {
-  const latest = await context.repos.qaRuns.latest(context.task.id);
-  if (!latest || latest.verdict === 'APPROVED') return [];
-  return latest.findings;
+/**
+ * Everything QA has raised and nobody has resolved, plus its advisory notes.
+ *
+ * This used to read the latest QA run alone, which meant a new iteration erased
+ * whatever the previous one found. Two passes over nearly the same diff produced
+ * disjoint blocking findings, so that was not tidying up: a verified defect left
+ * the record and shipped.
+ */
+async function openQaWork(context: JobContext): Promise<{ findings: QaFinding[]; notes: QaNote[] }> {
+  const qaRuns = await context.repos.qaRuns.listByTask(context.task.id);
+  if (qaRuns.length === 0) return { findings: [], notes: [] };
+
+  // When an implementation ran between two QA runs, the later one judged changed
+  // code. That is the only thing that lets a finding be treated as dealt with.
+  const runs = await context.repos.runs.listByTask(context.task.id);
+  const fixTimes = runs
+    .filter((run) => run.phase === 'IMPLEMENTATION' && run.finishedAt)
+    .map((run) => run.finishedAt as string);
+
+  return {
+    findings: carryOpenFindings({ qaRuns, fixTimes }),
+    notes: collectQaNotes(qaRuns),
+  };
+}
+
+/**
+ * Whether a fix should continue the session that wrote the code.
+ *
+ * Continuing is far cheaper while the session is small: the repository has
+ * already been read and the cached prefix is reused. It stops being cheaper when
+ * the session has grown, because the bill is turns multiplied by context size, and
+ * a session allowed to reach the size of the window is re-read on every turn. One
+ * implementation run measured at 810k tokens of cache written and 53.8M read — the
+ * equivalent of sixty-six full re-reads — and was forty per cent of an entire
+ * task's cost on its own.
+ *
+ * Past the ceiling the fix starts cold from the approved plan and the open
+ * findings, which is everything it actually needs.
+ */
+async function shouldContinueSession(context: JobContext): Promise<{ resume: boolean; size: number }> {
+  const ceiling = await context.repos.settings.integer(SETTING_KEYS.implementationContextCeiling);
+  const runs = await context.repos.runs.listByTask(context.task.id);
+  const previous = runs.filter((run) => run.phase === 'IMPLEMENTATION').at(-1);
+  // Cache creation is the honest measure of how big the conversation got: it is
+  // what was written into the cache, which is the context that then gets read
+  // back on every later turn.
+  const size = previous?.cacheCreationTokens ?? 0;
+  return { resume: size < ceiling, size };
 }
 
 /**
@@ -65,7 +116,9 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
   });
 
   const approved = await approvedReviewDocument(context);
-  const qaFindings = mode === 'FIX' ? await openQaFindings(context) : [];
+  const qaWork = mode === 'FIX' ? await openQaWork(context) : { findings: [], notes: [] };
+  const qaFindings = qaWork.findings;
+  const decisions = await context.repos.reviewDecisions.listAnswered(context.task.id);
   const projectContext = await buildProjectContext(context);
   const manifest = await context.repos.runtimeManifests.latest(context.project.id);
 
@@ -74,13 +127,22 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
 
   // A run that failed recently takes precedence over the last transcript: it is
   // the newer session, and it is the one that still has the work in it.
-  // A fix cycle otherwise continues the session that wrote the code originally.
+  // A fix cycle otherwise continues the session that wrote the code originally,
+  // but only while that session is still small enough to be worth continuing.
   const failedSessionId = await resumableSessionFor(context, 'IMPLEMENTATION');
+  const continuation = await shouldContinueSession(context);
+  if (mode === 'FIX' && !continuation.resume) {
+    context.logger.info('starting the fix in a fresh session: the previous one had grown past the ceiling', {
+      cacheCreationTokens: continuation.size,
+    });
+  }
   const previousSessionId =
-    failedSessionId ?? (mode === 'FIX' ? await lastImplementationSession(context) : null);
+    failedSessionId ??
+    (mode === 'FIX' && continuation.resume ? await lastImplementationSession(context) : null);
 
   const run = await context.repos.runs.start({
     taskId: context.task.id,
+    projectId: context.project.id,
     phase: 'IMPLEMENTATION',
     agentType: 'implementation',
     agentVersionId,
@@ -116,6 +178,8 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
       installRoot: context.installRoot,
       onSessionStart: recordSessionStart(context, run.id, Boolean(previousSessionId)),
       ...(qaFindings.length > 0 ? { qaFindings, qaIteration: context.task.qaIteration } : {}),
+      ...(qaWork.notes.length > 0 ? { qaNotes: qaWork.notes } : {}),
+      ...(decisions.length > 0 ? { decisions } : {}),
       ...(previousSessionId ? { resumeSessionId: previousSessionId } : {}),
     });
 
@@ -223,6 +287,37 @@ async function createSupplementalReview(
     summary: `The implementation discovered work that the approved plan does not cover: ${issues
       .map((issue) => issue.title)
       .join('; ')}`,
+    brief: {
+      headline: 'The implementation found work the approved plan does not cover.',
+      approach:
+        'The task stopped rather than widening the plan on its own. Decide whether this work belongs ' +
+        'in this story, and it resumes where it stopped.',
+      changes: issues.map((issue) => issue.title),
+      watchOut: [],
+      effort: `${issues.length} discovered item(s)`,
+    },
+    decisions: issues.map((issue, index) => ({
+      key: `discovered-${index + 1}`,
+      question: issue.title,
+      detail: issue.detail,
+      blocking: true,
+      options: [
+        {
+          key: 'include',
+          label: 'Include it in this story',
+          detail: 'The implementation continues and covers this as well.',
+          consequence: 'This story grows, and the approved plan no longer describes all of it.',
+          recommended: false,
+        },
+        {
+          key: 'separate',
+          label: 'Leave it for its own story',
+          detail: 'The implementation finishes what was approved and this is recorded for later.',
+          consequence: 'The change ships without this, which may be visible.',
+          recommended: true,
+        },
+      ],
+    })),
     sections: [
       {
         key: 'open_decisions' as const,
@@ -235,11 +330,19 @@ async function createSupplementalReview(
     expectedSymbols: [],
     riskSignals: [],
     openQuestions: issues.map((issue) => issue.title),
-  };
-  await context.repos.reviews.addVersion({
+  } satisfies ReviewDocument;
+  const version = await context.repos.reviews.addVersion({
     reviewId: review.id,
     document,
     markdown: `# Supplemental Review\n\n${document.summary}\n\n${document.sections[0]!.body}`,
+  });
+  // Rows, not just a document: a decision that only exists inside a JSON blob
+  // cannot be gated on and cannot be answered with a click, which is the whole
+  // reason the task stopped here rather than widening the plan by itself.
+  await context.repos.reviewDecisions.replaceForVersion({
+    taskId: context.task.id,
+    reviewVersionId: version.id,
+    decisions: document.decisions,
   });
   await context.events.append({
     projectId: context.project.id,

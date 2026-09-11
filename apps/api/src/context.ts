@@ -61,10 +61,33 @@ export function requireBody<T extends Record<string, unknown>>(body: unknown, fi
   return record;
 }
 
-/** The single project this installation manages. */
-export async function primaryProjectId(context: ApiContext, override?: string | null): Promise<string> {
+/**
+ * Which project a request is about.
+ *
+ * An installation now serves several repositories, so the project is part of the
+ * request rather than a property of the installation. The single-project case is
+ * still answered without being asked, because an installation with one project
+ * has no ambiguity to resolve and making every caller pass the id would be
+ * ceremony. Two projects and no id is a real ambiguity, and guessing it was how
+ * work quietly landed against the first one.
+ */
+export async function resolveProjectId(context: ApiContext, override?: string | null): Promise<string> {
   if (override) return override;
-  const project = await context.repos.projects.findPrimary();
-  if (!project) throw new ValidationError('No project has been initialised. Run "ai-engine init" first.');
-  return project.id;
+  const projects = await context.repos.projects.listWorkProjects();
+  if (projects.length === 1) return projects[0]!.id;
+  if (projects.length === 0) {
+    throw new ValidationError('No project has been added yet. Add one from the cockpit to get started.');
+  }
+  throw new ValidationError(
+    `This installation serves ${projects.length} projects, so the request has to say which one: pass projectId.`,
+  );
+}
+
+/** The installation itself, as a project. Stories against it change the engine. */
+export async function installationProjectId(context: ApiContext): Promise<string> {
+  const installation = await context.repos.projects.findInstallation();
+  if (!installation) {
+    throw new ValidationError('This installation is not registered as a project. Run "ai-engine init" again.');
+  }
+  return installation.id;
 }
