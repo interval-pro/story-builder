@@ -28,10 +28,15 @@ export function DraftTextarea({ textareaRef, rows, placeholder, onLengthChange, 
   const initial = useRef(retain?.current ?? '');
 
   useEffect(() => {
+    // Hold the element itself rather than reading the ref from the cleanup.
+    // React detaches a deleted subtree's host refs during the mutation phase,
+    // so by the time a passive cleanup runs textareaRef.current is already
+    // null and the draft would be dropped instead of retained.
+    const element = textareaRef.current;
     return () => {
       // The element is the complete text by construction. Reconstructing it
       // from change events would reintroduce the loss one indirection later.
-      if (retain && textareaRef.current) retain.current = textareaRef.current.value;
+      if (retain && element) retain.current = element.value;
     };
   }, [retain, textareaRef]);
 

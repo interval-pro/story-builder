@@ -39,8 +39,16 @@ export function ReviewView({ taskId, reviewId, version, notes, diff, canAct, onC
   }
 
   async function addNote() {
+    if (!selection) return;
     const text = readDraft(noteRef.current);
-    if (!selection || text.trim().length === 0) return;
+    if (text.trim().length === 0) {
+      // The length state can lag a dropped input event in either direction, so
+      // the button can be live over an empty box. Say so rather than doing
+      // nothing, which would be a second silent failure.
+      setError('A note needs some text.');
+      return;
+    }
+    setError(null);
     setBusy(true);
     try {
       await api.post(`/api/tasks/${taskId}/review/notes`, {

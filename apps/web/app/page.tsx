@@ -54,7 +54,14 @@ export default function StoriesPage() {
     // event can leave the length behind, and the API rejects under ten
     // characters, so the two gates must agree on the same text.
     const text = readDraft(draftRef.current);
-    if (text.trim().length < 10) return;
+    if (text.trim().length < 10) {
+      // The length state can lag a dropped input event in either direction, so
+      // the button can be live over text the API would reject. Say so rather
+      // than doing nothing, which would be a second silent failure.
+      setError('A story needs at least ten characters.');
+      return;
+    }
+    setError(null);
     setCreating(true);
     try {
       await api.post('/api/stories', { body: text, projectId });
