@@ -10,6 +10,7 @@ import {
   ensureDependencies,
   recordEngineMetrics,
   resolveAgentVersion,
+  runCompletion,
   workspacePathFor,
   type JobContext,
 } from '../job-context';
@@ -157,7 +158,7 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
       });
     }
 
-    await context.repos.runs.complete(run.id, agentRun.usage);
+    await context.repos.runs.complete(run.id, runCompletion(agentRun));
     await recordEngineMetrics(context, 'implementation', agentRun);
 
     // The branch, not the worktree, is what survives. Without this a retry or a

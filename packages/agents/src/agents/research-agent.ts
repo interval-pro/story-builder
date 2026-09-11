@@ -67,7 +67,34 @@ export async function runResearchAgent(
   return { findings: outcome.result, outcome };
 }
 
-/** Renders findings for the review agent prompt. */
+/**
+ * The digest the review agent is sent, with a pointer to the rest.
+ *
+ * The full findings run to tens of kilobytes and are already an artifact, so
+ * re-sending them on every run and every regeneration pays for the same bytes
+ * repeatedly. What stays inline is what the review has to answer directly: the
+ * summary, the files in scope, the risk signals and the open questions. The
+ * symbols, execution paths, database, test and dependency notes and the external
+ * findings are behind the read.
+ */
+export function renderFindingsBrief(findings: ResearchFindings, findingsPath: string): string {
+  const section = (title: string, body: string) => (body.trim() ? `### ${title}\n\n${body}\n` : '');
+  const list = (entries: string[]) => entries.map((entry) => `- ${entry}`).join('\n');
+
+  return [
+    `## Research findings (summary)\n\n${findings.summary}\n`,
+    section('Relevant files', findings.relevantFiles.map((file) => `- ${file.path}: ${file.why}`).join('\n')),
+    section('Risk signals', findings.riskSignals.map((signal) => `- ${signal.indicator}: ${signal.evidence}`).join('\n')),
+    section('Open questions the research could not close', list(findings.openQuestions)),
+    `### The full findings\n\nThe complete research findings are in this file:\n\n${findingsPath}\n\n` +
+      'Read it before you write the review. It holds the relevant symbols, the execution paths, the\n' +
+      'database, test and dependency notes and the external findings, none of which are repeated above.\n',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** Renders the full findings: the artifact, and the fallback when it is missing. */
 export function renderResearchFindings(findings: ResearchFindings): string {
   const section = (title: string, body: string) => (body.trim() ? `### ${title}\n\n${body}\n` : '');
   const list = (entries: string[]) => entries.map((entry) => `- ${entry}`).join('\n');

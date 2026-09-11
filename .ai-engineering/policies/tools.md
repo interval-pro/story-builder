@@ -33,10 +33,25 @@ translated into the CLI's own permission flags.
 | QA, Final report | `--restricted`, editing tools denied |
 | Implementation, Integration | `--permission-mode acceptEdits`, push, remote, sudo, docker and kubectl denied |
 | Push | `--restricted`, everything denied; the system pushes, not the agent |
+| Review, work pass only | `--add-dir` for the task's artifact directory, so the findings are read rather than re-sent inline |
+| Every phase, both passes | delegation and harness-discovery tools denied |
 
 `--restricted` removes the tools that run commands or code, so a read-only phase
 has no write tool to attempt in the first place. In Docker mode the workspace is
 also mounted read-only underneath, so the guarantee does not rest on a flag alone.
+
+Delegation and discovery are denied separately, because `--restricted` says
+nothing about either and the two writing phases do not set it at all. No phase
+may spawn a subagent: each of the five agents has a narrow job, its own prompt
+and its own worktree, and a subagent would open a second context window to do
+work the agent was already asked to do. No phase may search the harness for
+tools either, since an agent that spends turns finding out what exists is not
+doing the work it was given.
+
+The delegation half is governed by one setting, `AGENT_ALLOW_SUBAGENTS`, which is
+off. Harness discovery stays denied whatever that setting says. Both denials
+apply to the work pass and to the pass that writes the structured answer, which
+are built from the same module so a denial cannot reach one and miss the other.
 
 ## Secrets
 

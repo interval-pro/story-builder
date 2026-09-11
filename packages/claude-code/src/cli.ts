@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { AppError, createLogger } from '@ai-engine/shared';
 import type { ClaudeCliOptions, ClaudeResult, ClaudeStreamEvent, ClaudeToolUse } from './types';
+import { readModelUsage, readSubagentStats } from './usage';
 
 const logger = createLogger('claude-cli');
 
@@ -14,17 +15,24 @@ function buildArgs(options: ClaudeCliOptions, format: 'json' | 'stream-json'): s
   if (options.permissionMode) args.push('--permission-mode', options.permissionMode);
   if (options.allowedTools?.length) args.push('--allowed-tools', ...options.allowedTools);
   if (options.disallowedTools?.length) args.push('--disallowed-tools', ...options.disallowedTools);
+  for (const directory of options.additionalDirectories ?? []) args.push('--add-dir', directory);
   if (options.resumeSessionId) args.push('--resume', options.resumeSessionId);
   else if (options.sessionId) args.push('--session-id', options.sessionId);
   return args;
 }
 
-function readUsage(raw: Record<string, unknown>): ClaudeResult['usage'] {
+/**
+ * Both cache halves are recorded. `input_tokens` excludes the cached prefix, so
+ * on a resumed session it is a few dozen tokens for a prompt that cost dollars;
+ * reads and creation are where the rest of it is.
+ */
+export function readUsage(raw: Record<string, unknown>): ClaudeResult['usage'] {
   const usage = (raw['usage'] ?? {}) as Record<string, number>;
   return {
     inputTokens: usage['input_tokens'] ?? 0,
     outputTokens: usage['output_tokens'] ?? 0,
     cacheReadTokens: usage['cache_read_input_tokens'] ?? 0,
+    cacheCreationTokens: usage['cache_creation_input_tokens'] ?? 0,
   };
 }
 
@@ -37,6 +45,8 @@ function toResult(raw: Record<string, unknown>, toolUses: ClaudeToolUse[], trans
     durationMs: Number(raw['duration_ms'] ?? 0),
     costUsd: Number(raw['total_cost_usd'] ?? 0),
     usage: readUsage(raw),
+    modelUsage: readModelUsage(raw),
+    subagentStats: readSubagentStats(raw),
     permissionDenials: Array.isArray(raw['permission_denials']) ? (raw['permission_denials'] as unknown[]) : [],
     terminalReason: (raw['terminal_reason'] as string | null) ?? null,
     toolUses,

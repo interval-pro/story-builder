@@ -2,7 +2,7 @@ import type { ReviewDocument, ReviewNote } from '@ai-engine/domain';
 import { loadAgentPrompt } from '../prompts/prompt-loader';
 import { validateLearningResult, type LearningResult } from '../schemas';
 import { renderProjectContext, type ProjectContext } from '../context';
-import type { AgentRunner } from '../runner';
+import type { AgentRunOutcome, AgentRunner } from '../runner';
 
 export interface LearningAgentInput {
   runner: AgentRunner;
@@ -37,10 +37,16 @@ Extract nothing rather than extracting something shallow. Return only the JSON o
 /**
  * Turns human corrections into reusable engineering principles. The correction
  * itself is never stored as a rule; the reasoning behind it is.
+ *
+ * The outcome is returned alongside the result so this agent's spend is recorded
+ * like every other agent's. It is null when there was nothing to learn from and
+ * no engine ran at all.
  */
-export async function runLearningAgent(input: LearningAgentInput): Promise<LearningResult> {
+export async function runLearningAgent(
+  input: LearningAgentInput,
+): Promise<{ result: LearningResult; outcome: AgentRunOutcome<LearningResult> | null }> {
   if (input.notes.length === 0 && input.qaSummaries.length === 0) {
-    return { principles: [], invariants: [] };
+    return { result: { principles: [], invariants: [] }, outcome: null };
   }
 
   const instructions = await loadAgentPrompt('learning', input.installRoot);
@@ -77,5 +83,5 @@ export async function runLearningAgent(input: LearningAgentInput): Promise<Learn
     validate: validateLearningResult,
   });
 
-  return outcome.result;
+  return { result: outcome.result, outcome };
 }

@@ -2,12 +2,25 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { formatTokens, formatUsd } from '../lib/format';
 
 interface Props {
   taskId: string;
   detail: {
     task: { state: string; qaIteration: number; baseMoved: boolean };
-    runs: { id: string; phase: string; agentType: string; status: string; startedAt: string; finishedAt: string | null }[];
+    runs: {
+      id: string;
+      phase: string;
+      agentType: string;
+      status: string;
+      startedAt: string;
+      finishedAt: string | null;
+      inputTokens: number | null;
+      outputTokens: number | null;
+      cacheReadTokens: number | null;
+      cacheCreationTokens: number | null;
+      costUsd: number | null;
+    }[];
     qaRuns: { id: string; iteration: number; verdict: string; findings: { id: string; severity: string; category: string; summary: string; detail: string; file: string | null }[] }[];
     testRuns: { id: string; command: string; exitCode: number; passed: boolean; createdAt: string }[];
     conflicts: { id: string; kind: string; severity: string; resource: string; description: string }[];
@@ -25,6 +38,59 @@ interface ToolCall {
   outputSummary: string;
   durationMs: number;
   createdAt: string;
+}
+
+type Run = Props['detail']['runs'][number];
+
+interface AgentSpend {
+  agentType: string;
+  runs: number;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  unrecordedRuns: number;
+}
+
+/**
+ * Adds up what the task has spent, per agent and in total.
+ *
+ * A run with no recorded cost contributes nothing and is counted instead, so an
+ * incomplete sum is never presented as a complete one. Cache reads are kept
+ * beside the input count rather than folded into it: they bill at a fraction of
+ * the price, and one combined number would look plausible and be wrong.
+ */
+function summariseSpend(runs: Run[]): { byAgent: AgentSpend[]; total: AgentSpend; unrecorded: number } {
+  const empty = (agentType: string): AgentSpend => ({
+    agentType,
+    runs: 0,
+    costUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    unrecordedRuns: 0,
+  });
+
+  const byAgent = new Map<string, AgentSpend>();
+  const total = empty('total');
+
+  for (const run of runs) {
+    const agent = byAgent.get(run.agentType) ?? empty(run.agentType);
+    for (const bucket of [agent, total]) {
+      bucket.runs += 1;
+      bucket.costUsd += run.costUsd ?? 0;
+      bucket.inputTokens += run.inputTokens ?? 0;
+      bucket.outputTokens += run.outputTokens ?? 0;
+      bucket.cacheReadTokens += run.cacheReadTokens ?? 0;
+      bucket.cacheCreationTokens += run.cacheCreationTokens ?? 0;
+      if (run.costUsd === null) bucket.unrecordedRuns += 1;
+    }
+    byAgent.set(run.agentType, agent);
+  }
+
+  return { byAgent: [...byAgent.values()], total, unrecorded: total.unrecordedRuns };
 }
 
 /** Live view of what the agents are doing right now. */
@@ -58,6 +124,7 @@ export function ExecutionView({ taskId, detail, onAction }: Props) {
 
   const currentRun = detail.runs.find((run) => run.status === 'RUNNING');
   const latestQa = detail.qaRuns[detail.qaRuns.length - 1];
+  const spend = summariseSpend(detail.runs);
 
   return (
     <div>
@@ -130,6 +197,66 @@ export function ExecutionView({ taskId, detail, onAction }: Props) {
           )}
         </div>
       ) : null}
+
+      <div className="card">
+        <div className="card-label">What this task has spent</div>
+        <div className="card-value">{formatUsd(spend.total.costUsd)}</div>
+        <div className="card-detail">
+          {formatTokens(spend.total.inputTokens)} in · {formatTokens(spend.total.outputTokens)} out ·{' '}
+          {formatTokens(spend.total.cacheReadTokens)} cache read · {formatTokens(spend.total.cacheCreationTokens)} cache
+          written
+        </div>
+        <div className="card-detail">
+          Cost per run is measured: it is the figure the engine itself reports. This total sums the runs that recorded
+          one.
+        </div>
+        {spend.unrecorded > 0 ? (
+          <div className="card-detail">
+            {spend.unrecorded} of {detail.runs.length} run(s) recorded no cost, so this total is partial.
+          </div>
+        ) : null}
+
+        {spend.byAgent.length === 0 ? (
+          <p className="empty">No run has reported what it spent yet.</p>
+        ) : (
+          <div className="table-scroll">
+            <table>
+              <tbody>
+                {spend.byAgent.map((agent) => (
+                  <tr key={agent.agentType}>
+                    <td className="col-md">{agent.agentType}</td>
+                    <td className="col-sm">{agent.unrecordedRuns === agent.runs ? 'not recorded' : formatUsd(agent.costUsd)}</td>
+                    <td className="meta">
+                      {agent.runs} run(s) · {formatTokens(agent.inputTokens)} in ·{' '}
+                      {formatTokens(agent.outputTokens)} out · {formatTokens(agent.cacheReadTokens)} cache read
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="table-scroll">
+          <table>
+            <tbody>
+              {detail.runs.map((run) => (
+                <tr key={run.id}>
+                  <td className="col-md">
+                    {run.agentType} ({run.phase})
+                  </td>
+                  <td className="col-sm">{run.costUsd === null ? 'not recorded' : formatUsd(run.costUsd)}</td>
+                  <td className="meta">
+                    {formatTokens(run.inputTokens ?? 0)} in · {formatTokens(run.outputTokens ?? 0)} out ·{' '}
+                    {formatTokens(run.cacheReadTokens ?? 0)} cache read ·{' '}
+                    {formatTokens(run.cacheCreationTokens ?? 0)} cache written
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       <div className="card">
         <h3>Tests</h3>

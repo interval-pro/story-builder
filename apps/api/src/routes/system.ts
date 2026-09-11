@@ -126,6 +126,45 @@ export function registerSystemRoutes(router: HttpRouter, context: ApiContext): v
     return { metrics: await context.repos.metrics.summary(projectId) };
   });
 
+  /**
+   * What the agents have spent in a rolling window.
+   *
+   * Per-run cost is measured: it is the CLI's own total_cost_usd, read from the
+   * result payload rather than computed from tokens and a price table. The window
+   * total is derived: it is our sum of those measured costs over a range we
+   * chose. The payload carries no rate-limit field of any kind, so nothing here
+   * reports the account's own limit.
+   */
+  router.get('/api/system/spend', async ({ query }) => {
+    const projectId = await primaryProjectId(context, query.get('projectId'));
+    const requested = Number.parseFloat(query.get('windowHours') ?? '');
+    const windowHours = Number.isFinite(requested) && requested > 0 ? requested : 5;
+    const since = new Date(Date.now() - windowHours * 3_600_000);
+
+    const byAgent = await context.repos.runs.spendSince(projectId, since);
+    const total = byAgent.reduce(
+      (sum, agent) => ({
+        runs: sum.runs + agent.runs,
+        costUsd: sum.costUsd + agent.costUsd,
+        inputTokens: sum.inputTokens + agent.inputTokens,
+        outputTokens: sum.outputTokens + agent.outputTokens,
+        cacheReadTokens: sum.cacheReadTokens + agent.cacheReadTokens,
+        cacheCreationTokens: sum.cacheCreationTokens + agent.cacheCreationTokens,
+        unrecordedRuns: sum.unrecordedRuns + agent.unrecordedRuns,
+      }),
+      { runs: 0, costUsd: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, unrecordedRuns: 0 },
+    );
+
+    return {
+      windowHours,
+      since: since.toISOString(),
+      until: new Date().toISOString(),
+      total,
+      byAgent,
+      costProvenance: { perRun: 'measured', window: 'derived' },
+    };
+  });
+
   router.get('/api/conflicts', async () => ({ conflicts: await context.conflicts.allOpenConflicts() }));
 
   router.get('/api/tasks/:id/base-drift', async ({ params }) => {

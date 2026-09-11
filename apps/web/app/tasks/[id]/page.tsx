@@ -24,7 +24,20 @@ interface TaskDetail {
   applies: InstallationApply[];
   story: { id: string; title: string };
   revision: { revision: number; body: string };
-  runs: { id: string; phase: string; agentType: string; status: string; startedAt: string; finishedAt: string | null }[];
+  runs: {
+    id: string;
+    phase: string;
+    agentType: string;
+    status: string;
+    startedAt: string;
+    finishedAt: string | null;
+    // Null means never recorded, which is not the same as free.
+    inputTokens: number | null;
+    outputTokens: number | null;
+    cacheReadTokens: number | null;
+    cacheCreationTokens: number | null;
+    costUsd: number | null;
+  }[];
   qaRuns: { id: string; iteration: number; verdict: string; findings: { id: string; severity: string; category: string; summary: string; detail: string; file: string | null }[] }[];
   testRuns: { id: string; command: string; exitCode: number; passed: boolean; createdAt: string }[];
   conflicts: { id: string; kind: string; severity: string; resource: string; description: string }[];

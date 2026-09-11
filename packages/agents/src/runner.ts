@@ -29,10 +29,20 @@ export interface AgentRunOutcome<T> {
   result: T;
   transcript: string;
   toolCallCount: number;
-  usage: { inputTokens: number; outputTokens: number };
+  /**
+   * Cache reads are kept beside the input count rather than folded into it.
+   * They bill at roughly a tenth of input, so one combined number would look
+   * plausible and be wrong, and input alone is a few dozen tokens on a resumed
+   * session whatever the prompt actually cost.
+   */
+  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number };
   /** Set by engines that keep a resumable conversation. */
   sessionId: string | null;
   costUsd: number | null;
+  /** Per-model token counts when the engine reports them, otherwise null. */
+  modelUsage: Record<string, unknown> | null;
+  /** The only direct evidence of a phase that still delegated. Null if unknown. */
+  subagentStats: Record<string, unknown> | null;
   /** Actions the engine refused. Anything here is worth a human's attention. */
   permissionDenials: unknown[];
 }
@@ -83,7 +93,11 @@ export class BuiltinAgentRunner implements AgentRunner {
       toolCallCount: loop.toolCallCount,
       usage: loop.usage,
       sessionId: null,
+      // The provider reports neither a cost nor a per-model breakdown, and this
+      // engine has no delegation tool to report on.
       costUsd: null,
+      modelUsage: null,
+      subagentStats: null,
       permissionDenials: [],
     };
   }

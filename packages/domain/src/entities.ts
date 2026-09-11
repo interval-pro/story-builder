@@ -73,6 +73,13 @@ export interface TaskRun {
   finishedAt: string | null;
   inputTokens: number | null;
   outputTokens: number | null;
+  /** Null means never recorded. Zero means the run genuinely cost nothing. */
+  cacheReadTokens: number | null;
+  cacheCreationTokens: number | null;
+  costUsd: number | null;
+  /** Measured per-model usage as the engine reported it, shape unspecified. */
+  modelUsage: Record<string, unknown> | null;
+  subagentStats: Record<string, unknown> | null;
   errorMessage: string | null;
 }
 

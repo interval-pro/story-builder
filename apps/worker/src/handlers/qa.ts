@@ -9,6 +9,7 @@ import {
   ensureDependencies,
   recordEngineMetrics,
   resolveAgentVersion,
+  runCompletion,
   workspacePathFor,
   type JobContext,
 } from '../job-context';
@@ -184,7 +185,7 @@ export async function handleQa(context: JobContext): Promise<void> {
       contentType: 'text/markdown',
       content: outcome.transcript,
     });
-    await context.repos.runs.complete(run.id, outcome.usage);
+    await context.repos.runs.complete(run.id, runCompletion(outcome));
     await recordEngineMetrics(context, 'qa', outcome);
     await context.repos.tasks.update(context.task.id, { qaIteration: iteration });
 

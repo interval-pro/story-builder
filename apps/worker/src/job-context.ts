@@ -11,7 +11,7 @@ import {
   type Task,
   type TaskSize,
 } from '@ai-engine/domain';
-import { createRepositories, type Database, type Repositories } from '@ai-engine/db';
+import { createRepositories, type Database, type Repositories, type RunCompletion } from '@ai-engine/db';
 import { EventLog } from '@ai-engine/events';
 import { FilesystemArtifactStore, type ArtifactStore } from '@ai-engine/artifacts';
 import { createProviderOrMock } from '@ai-engine/ai-provider';
@@ -106,6 +106,15 @@ const EFFORT_BY_SIZE: Record<TaskSize, 'low' | 'medium' | 'high'> = {
 
 export function workspacePathFor(taskId: string): string {
   return path.join(loadConfig().paths.workspacesRoot, `task-${taskId}`);
+}
+
+/**
+ * Where this task's artifacts live, matching the layout the artifact store
+ * writes. It sits outside the worktree, so an agent only reaches it when the
+ * phase is given it explicitly.
+ */
+export function taskArtifactsPathFor(projectId: string, taskId: string): string {
+  return path.join(loadConfig().paths.artifactsRoot, projectId, taskId);
 }
 
 /**
@@ -219,6 +228,8 @@ export async function createAgentRunner(input: {
   allowWeb?: boolean;
   /** Scales reasoning effort to the change. Omitted means the phase default. */
   size?: TaskSize;
+  /** Directories outside the worktree this phase's work pass may read. */
+  additionalDirectories?: string[];
 }): Promise<AgentRunner> {
   const config = loadConfig();
   const { context, runId, phase } = input;
@@ -230,6 +241,8 @@ export async function createAgentRunner(input: {
       timeoutMs: config.agents.claudeTimeoutMs,
       resultTimeoutMs: config.agents.claudeResultTimeoutMs,
       binary: config.agents.claudeBinary,
+      allowSubagents: config.agents.allowSubagents,
+      ...(input.additionalDirectories?.length ? { additionalDirectories: input.additionalDirectories } : {}),
       ...(input.size ? { effort: EFFORT_BY_SIZE[input.size] } : {}),
       ...(config.agents.claudeModel ? { model: config.agents.claudeModel } : {}),
       logger: context.logger,
@@ -255,13 +268,56 @@ export async function createAgentRunner(input: {
 }
 
 /**
+ * What a finished run spent, in the shape the repository stores.
+ *
+ * Every call site builds its completion record through this, so a run recorded
+ * from one handler carries the same numbers as a run recorded from another. The
+ * cost is the engine's own figure, not derived from tokens and a price table.
+ */
+export function runCompletion(outcome: {
+  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number };
+  costUsd: number | null;
+  modelUsage: Record<string, unknown> | null;
+  subagentStats: Record<string, unknown> | null;
+}): RunCompletion {
+  return {
+    inputTokens: outcome.usage.inputTokens,
+    outputTokens: outcome.usage.outputTokens,
+    cacheReadTokens: outcome.usage.cacheReadTokens,
+    cacheCreationTokens: outcome.usage.cacheCreationTokens,
+    costUsd: outcome.costUsd,
+    modelUsage: outcome.modelUsage,
+    subagentStats: outcome.subagentStats,
+  };
+}
+
+/** True when the engine reported a subagent actually doing something. */
+function reportsSubagentWork(stats: Record<string, unknown> | null): boolean {
+  if (!stats) return false;
+  const values = Object.values(stats);
+  return values.some((value) => {
+    if (typeof value === 'number') return value !== 0;
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return reportsSubagentWork(value as Record<string, unknown>);
+    }
+    return false;
+  });
+}
+
+/**
  * Records what the engine actually cost and whether it tried anything it was
  * not allowed to do. A non-empty denial list is a signal worth a human's eyes.
  */
 export async function recordEngineMetrics(
   context: JobContext,
   agentType: string,
-  outcome: { costUsd: number | null; toolCallCount: number; permissionDenials: unknown[]; sessionId: string | null },
+  outcome: {
+    costUsd: number | null;
+    toolCallCount: number;
+    permissionDenials: unknown[];
+    sessionId: string | null;
+    subagentStats?: Record<string, unknown> | null;
+  },
 ): Promise<void> {
   if (outcome.costUsd !== null) {
     await context.repos.metrics.record({
@@ -279,6 +335,24 @@ export async function recordEngineMetrics(
     value: outcome.toolCallCount,
     labels: { agent: agentType },
   });
+
+  // Delegation is denied unless the installation turned it on, so subagent work
+  // means either the denial did not hold or someone turned it on. Storing the
+  // stats is not enough on its own: nobody reads a column, and this is the one
+  // thing that would tell us.
+  if (reportsSubagentWork(outcome.subagentStats ?? null)) {
+    context.logger.warn('the engine reported a subagent doing work, which is a second context window', {
+      agent: agentType,
+      subagentStats: outcome.subagentStats,
+    });
+    await context.repos.metrics.record({
+      projectId: context.project.id,
+      taskId: context.task.id,
+      name: 'agent_subagents',
+      value: 1,
+      labels: { agent: agentType },
+    });
+  }
 
   if (outcome.permissionDenials.length > 0) {
     await context.repos.metrics.record({
