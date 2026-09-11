@@ -170,7 +170,13 @@ export function loadConfig(reload = false): SystemConfig {
       workerConcurrency: int('WORKER_CONCURRENCY', 2),
       maxQaIterations: int('MAX_QA_ITERATIONS', 5),
       jobMaxAttempts: int('JOB_MAX_ATTEMPTS', 3),
-      jobLeaseSeconds: int('JOB_LEASE_SECONDS', 900),
+      // Clamped, because a lease shorter than the heartbeat can renew is how two
+      // agents end up in one worktree. The worker renews every
+      // max(30s, lease/3), so anything under 90s is reclaimed while it is still
+      // running and a second worker starts the same job from the top. The agent
+      // notices — it reports a concurrent writer and refuses — but by then two
+      // sessions have been paid for.
+      jobLeaseSeconds: Math.max(120, int('JOB_LEASE_SECONDS', 900)),
     },
     agents: {
       engine: (str('AGENT_ENGINE', 'claude-code') as AgentEngineConfig['engine']),

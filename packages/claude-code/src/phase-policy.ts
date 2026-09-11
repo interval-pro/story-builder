@@ -18,6 +18,15 @@ const FORBIDDEN_COMMANDS = [
 ];
 
 /**
+ * The chat window is the person's own terminal, opened in the project directory,
+ * so it keeps the capabilities they already have there — pushing included. Only
+ * the two that are destructive beyond the project stay refused, because nothing
+ * a person would type into a project chat needs them and an unattended session
+ * cannot be asked.
+ */
+const CHAT_FORBIDDEN_COMMANDS = ['Bash(sudo:*)', 'Bash(rm -rf /:*)'];
+
+/**
  * Delegation. Each subagent opens its own context window, and none of the five
  * agents has a reason to delegate: each has a narrow job, its own prompt and its
  * own worktree. `Agent` and `Task` are the same tool under two names across CLI
@@ -42,6 +51,11 @@ export interface PolicyOptions {
   /** Defaults to false. Set from AGENT_ALLOW_SUBAGENTS, never read here. */
   allowSubagents?: boolean;
   /**
+   * What a chat session may do. Only the CHAT phase reads it; every other phase
+   * has a permission mode that follows from what that phase is allowed to be.
+   */
+  chatPermissionMode?: PhasePolicy['permissionMode'];
+  /**
    * The effort the answer pass runs at. Only answerPassPolicy reads it: a work
    * pass gets its effort from its phase, optionally overridden by size.
    */
@@ -61,6 +75,24 @@ function overheadTools(options: PolicyOptions): string[] {
 export function policyForPhase(phase: ExecutionPhase, options: PolicyOptions = {}): PhasePolicy {
   const overhead = overheadTools(options);
   switch (phase) {
+    case 'INTAKE':
+      // Shaping an idea into stories. It reads the repository so its questions
+      // are about this code rather than about software in general, and it has
+      // nothing to write to: there is no task and no branch yet.
+      return {
+        restricted: true,
+        permissionMode: 'dontAsk',
+        disallowedTools: [...EDIT_TOOLS, ...overhead],
+        effort: 'medium',
+      };
+    case 'CHAT':
+      // Deliberately the widest policy here, and the only one a person drives
+      // turn by turn. Narrowing it would make the chat something other than the
+      // terminal it is meant to replace.
+      return {
+        permissionMode: options.chatPermissionMode ?? 'acceptEdits',
+        disallowedTools: [...CHAT_FORBIDDEN_COMMANDS, ...overhead],
+      };
     case 'RESEARCH':
     case 'REVIEW':
       return {
@@ -79,8 +111,20 @@ export function policyForPhase(phase: ExecutionPhase, options: PolicyOptions = {
       };
     case 'IMPLEMENTATION':
     case 'INTEGRATION':
+      // `auto`, not `acceptEdits`. Measured against CLI 2.1.268: under
+      // `acceptEdits` the agent may write files but `npm test` and `npm run build`
+      // are refused — they prompt, and a headless session has nobody to prompt,
+      // so the prompt is auto-denied. The implementation agent is told to verify
+      // the build and the tests before reporting success, and for three sessions
+      // it reported, accurately, that it could not run anything at all.
+      //
+      // `auto` lets those commands run while the deny list below still holds:
+      // confirmed by running `git push --dry-run` under `auto` with this list,
+      // which came back refused with a recorded denial. So pushing stays a step
+      // the system performs after a human approval, never something an agent can
+      // reach.
       return {
-        permissionMode: 'acceptEdits',
+        permissionMode: 'auto',
         disallowedTools: [...FORBIDDEN_COMMANDS, ...overhead],
         effort: 'xhigh',
       };

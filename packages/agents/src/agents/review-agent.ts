@@ -42,12 +42,13 @@ export interface ReviewAgentInput {
    * retry reaches the findings-reuse branch and runs cold with the same prompt.
    *
    * `--resume` alongside `--append-system-prompt` and a changed `--effort` is
-   * already exercised by the fix cycle. `--add-dir` on a resumed session is
-   * documented by `claude --help` as an unconditional option, but was not
-   * confirmed by running it; if it turns out to be dropped, the resumed review
-   * is pointed at a findings file it cannot read and review_findings_unread
-   * fires, which is the loud signal either way. The fix is to pass
-   * findingsPath: null when resuming, which inlines the findings instead.
+   * already exercised by the fix cycle. `--add-dir` on a resumed session was
+   * confirmed by running the CLI directly against version 2.1.268, in both
+   * shapes that matter: a directory added on the first call is still readable
+   * after a resume, and a directory added for the first time on the resumed call
+   * is readable too. The resumed review can therefore be pointed at the findings
+   * file, and review_findings_unread stays the signal for an agent that simply
+   * did not read it.
    */
   resumeSessionId?: string;
   maxIterations?: number;
@@ -67,6 +68,26 @@ function resultInstruction(size: TaskSize): string {
 
 {
   "summary": "string, two or three sentences a reviewer can read first",
+  "brief": {
+    "headline": "string, one sentence: what will be different once this is done",
+    "approach": "string, two or three sentences of plain language: how, and why this way",
+    "changes": ["string, one line each: what changes"],
+    "watchOut": ["string, one line each: the downsides and risks worth knowing before approving"],
+    "effort": "string, concrete: e.g. 4 files, one migration"
+  },
+  "decisions": [{
+    "key": "short-stable-slug",
+    "question": "string, the thing you cannot settle yourself",
+    "detail": "string, what hangs on the answer",
+    "blocking": true,
+    "options": [{
+      "key": "short-slug",
+      "label": "string, the choice in a few words",
+      "detail": "string, what it means in practice",
+      "consequence": "string, what it costs or rules out",
+      "recommended": false
+    }]
+  }],
   "sections": {
 ${sectionCatalog(size)}
   },
@@ -80,6 +101,17 @@ ${sectionCatalog(size)}
 Each value in "sections" is the markdown body of that section, not its title. Every key must be
 present. Give the optional ones an empty string unless they carry a fact the implementer needs;
 an empty section is better than a restatement of another one.
+
+The brief is not a summary of the review, it is the review as a person will read it before
+deciding. Almost nobody reads twenty two sections before approving, so write the brief as though it
+is the only thing that will be read, and state the downsides there rather than leaving them for a
+section further down.
+
+A decision is a question you cannot settle by reading the code, where the answers lead to
+genuinely different software. Mark it blocking when implementing without an answer would mean
+guessing. Give two or three options, each with its own consequence, and mark at most one
+recommended. Do not invent decisions to look careful: an empty list is the right answer for most
+changes, and a question you can answer yourself is not a decision, it is the plan.
 
 ${reviewBudgetFor(size).guidance}
 
@@ -98,6 +130,8 @@ function patchResultInstruction(size: TaskSize): string {
 
 {
   "summary": "string, only if the summary itself has to change",
+  "brief": { "headline": "...", "approach": "...", "changes": ["..."], "watchOut": ["..."], "effort": "..." },
+  "decisions": [{ "key": "...", "question": "...", "detail": "...", "blocking": true, "options": [{ "key": "...", "label": "...", "detail": "...", "consequence": "...", "recommended": false }] }],
   "sections": {
     "<key of a section you are changing>": "the full new markdown body of that section"
   },
@@ -115,8 +149,11 @@ want for every section the notes did not affect. To empty a section, include its
 string.
 
 Leave out every top-level field you are not changing too. "implementationSteps", "expectedFiles",
-"expectedSymbols", "riskSignals" and "openQuestions" each replace the previous list in full when
-present, so include one only if the list itself changes, and then give all of its entries.
+"expectedSymbols", "riskSignals", "openQuestions" and "decisions" each replace the previous list in
+full when present, so include one only if the list itself changes, and then give all of its entries.
+Include "brief" whenever the notes changed the shape of the answer, because the brief is what the
+next person reads; reuse a decision's existing key when the question survives, and the answer
+already given for it carries across instead of being asked again.
 
 The section keys are:
 

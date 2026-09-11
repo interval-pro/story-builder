@@ -9,18 +9,30 @@ import type { ApiContext } from './context';
  * Applying replaces the running engine, so it is only allowed when nothing
  * else is in flight and the installation has no work of its own that would be
  * lost. Every reason it is refused is one the cockpit can show.
+ *
+ * "In flight" means a job is pending or running. It used to mean any task not in
+ * a terminal state, which counted a review waiting for approval and a task that
+ * had been blocked for a day: an update was refused twice with the words "tasks
+ * are still running" while nothing was running at all. A task waiting at a human
+ * gate survives a restart perfectly well, because its state is in Postgres and
+ * Postgres stays up.
  */
 export async function assertCanApply(context: ApiContext, installation: Project): Promise<void> {
   const running = await context.repos.installationApplies.findRunning();
   if (running) throw new ValidationError('Another apply is already running');
 
-  for (const candidate of await context.repos.projects.list()) {
-    const active = await context.repos.tasks.listActive(candidate.id);
-    if (active.length > 0) {
-      throw new ValidationError(
-        `${active.length} task(s) are still running. Applying stops every service, so let them finish first.`,
-      );
-    }
+  const inFlight = await context.repos.tasks.listWithActiveJobs();
+  if (inFlight.length > 0) {
+    // Named, because "N tasks" sends a person hunting and the list is two lines.
+    const named = inFlight
+      .slice(0, 3)
+      .map((task) => `${task.storyTitle} (${task.projectName})`)
+      .join('; ');
+    const more = inFlight.length > 3 ? `, and ${inFlight.length - 3} more` : '';
+    throw new ValidationError(
+      `${inFlight.length} task(s) have work in progress: ${named}${more}. Applying stops every service, so let them ` +
+        'finish or stop them first. Tasks waiting for a decision do not need to be cleared.',
+    );
   }
 
   const status = await new GitClient(installation.repoPath).status({ includeUntracked: false });

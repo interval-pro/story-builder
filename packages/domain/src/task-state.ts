@@ -84,11 +84,28 @@ const BASE_TRANSITIONS: Record<TaskState, TaskState[]> = {
   QA_RUNNING: ['FINAL_REVIEW_READY', 'FIX_REQUIRED', 'BLOCKED'],
   FIX_REQUIRED: ['FIXING', 'BLOCKED'],
   FIXING: ['QA_QUEUED', 'BLOCKED'],
-  BLOCKED: ['REVIEW_FEEDBACK_RECEIVED', 'IMPLEMENTATION_QUEUED', 'FIX_REQUIRED', 'ANALYSIS_QUEUED'],
+  // PUSHING and INTEGRATION_VALIDATION are here because a push that fails blocks
+  // the task, and every other route out of BLOCKED re-runs an agent for work that
+  // was already finished. Without them the only reachable end was STOPPED, which
+  // meant pushing the branch by hand.
+  BLOCKED: [
+    'REVIEW_FEEDBACK_RECEIVED',
+    'IMPLEMENTATION_QUEUED',
+    'FIX_REQUIRED',
+    'ANALYSIS_QUEUED',
+    'INTEGRATION_VALIDATION',
+    'PUSHING',
+  ],
   FINAL_REVIEW_READY: ['PR_APPROVAL_REQUIRED', 'REVIEW_FEEDBACK_RECEIVED', 'FIX_REQUIRED'],
   PR_APPROVAL_REQUIRED: ['INTEGRATION_VALIDATION'],
   INTEGRATION_VALIDATION: ['PUSHING', 'FIX_REQUIRED', 'BLOCKED', 'COMPLETED'],
-  PUSHING: ['PR_CREATED', 'BLOCKED'],
+  // COMPLETED is reachable directly because not every finish goes through a pull
+  // request. A project with no configured remote finishes on a local branch, and
+  // an installation is never pushed at all: its work waits on a branch until
+  // someone applies it. Both paths ended here and both threw
+  // "Transition PUSHING -> COMPLETED is not allowed", which failed the task after
+  // all of its work had succeeded.
+  PUSHING: ['PR_CREATED', 'COMPLETED', 'BLOCKED'],
   PR_CREATED: ['COMPLETED'],
   COMPLETED: [],
   WAITING_FOR_TASK: ['ANALYSIS_QUEUED', 'IMPLEMENTATION_QUEUED', 'BLOCKED'],
@@ -96,7 +113,20 @@ const BASE_TRANSITIONS: Record<TaskState, TaskState[]> = {
   PAUSED: [],
   STOPPING: ['STOPPED'],
   STOPPED: [],
-  FAILED: ['ANALYSIS_QUEUED', 'IMPLEMENTATION_QUEUED', 'QA_QUEUED', 'ROLLING_BACK', 'STOPPING'],
+  // Every state a retry can continue from. A task that failed after its pull
+  // request was approved failed in the integration or in the push, and sending it
+  // back to QA would re-run an agent over a diff that has already been checked
+  // and approved.
+  FAILED: [
+    'ANALYSIS_QUEUED',
+    'REVIEW_REGENERATING',
+    'IMPLEMENTATION_QUEUED',
+    'QA_QUEUED',
+    'INTEGRATION_VALIDATION',
+    'PUSHING',
+    'ROLLING_BACK',
+    'STOPPING',
+  ],
   ROLLING_BACK: ['ROLLED_BACK', 'FAILED'],
   ROLLED_BACK: [],
 };

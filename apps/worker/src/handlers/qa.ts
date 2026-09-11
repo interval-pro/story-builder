@@ -1,5 +1,5 @@
 import { AppError, loadConfig } from '@ai-engine/shared';
-import { classifyTaskSize } from '@ai-engine/domain';
+import { carryOpenFindings, classifyTaskSize } from '@ai-engine/domain';
 import { loadAgentPrompt, runQaAgent } from '@ai-engine/agents';
 import { fullDiff, GitClient } from '@ai-engine/git';
 import {
@@ -99,6 +99,19 @@ export async function handleQa(context: JobContext): Promise<void> {
   const approved = await context.repos.reviews.getVersion(approvedVersionId);
 
   const iteration = context.task.qaIteration + 1;
+
+  // What earlier iterations raised and nobody has resolved. Each iteration runs
+  // in a fresh context that sees only the diff, so it cannot know what the last
+  // one found unless it is told, and a finding that quietly disappears between
+  // iterations is how a verified defect leaves the record.
+  const previousQaRuns = await context.repos.qaRuns.listByTask(context.task.id);
+  const implementationRuns = await context.repos.runs.listByTask(context.task.id);
+  const carriedFindings = carryOpenFindings({
+    qaRuns: previousQaRuns,
+    fixTimes: implementationRuns
+      .filter((run) => run.phase === 'IMPLEMENTATION' && run.finishedAt)
+      .map((run) => run.finishedAt as string),
+  });
   const prompt = await loadAgentPrompt('qa', context.installRoot);
   const agentVersionId = await resolveAgentVersion(context, 'qa', prompt);
   // QA never sees the implementation's session: it must judge the code without
@@ -108,6 +121,7 @@ export async function handleQa(context: JobContext): Promise<void> {
 
   const run = await context.repos.runs.start({
     taskId: context.task.id,
+    projectId: context.project.id,
     phase: 'QA',
     agentType: 'qa',
     agentVersionId,
@@ -141,6 +155,7 @@ export async function handleQa(context: JobContext): Promise<void> {
       testResults,
       iteration,
       installRoot: context.installRoot,
+      ...(carriedFindings.length > 0 ? { carriedFindings } : {}),
       onSessionStart: recordSessionStart(context, run.id, Boolean(previousSessionId)),
       ...(previousSessionId ? { resumeSessionId: previousSessionId } : {}),
     });
@@ -172,6 +187,10 @@ export async function handleQa(context: JobContext): Promise<void> {
       iteration,
       verdict,
       findings,
+      // Recorded even when the verdict is APPROVED: a remark made about a change
+      // that passed is the one most likely to be useful later and the one most
+      // likely to be lost.
+      notes: report.notes,
     });
     await context.artifacts.put({
       projectId: context.project.id,
@@ -190,6 +209,9 @@ export async function handleQa(context: JobContext): Promise<void> {
           (finding) =>
             `## [${finding.severity}/${finding.category}] ${finding.summary}\n\n${finding.detail}\n\nSuggested fix: ${finding.suggestedFix}`,
         ),
+        ...(report.notes.length > 0
+          ? ['', '# Notes', '', ...report.notes.map((note) => `- ${note.summary}${note.file ? ` (${note.file})` : ''}`)]
+          : []),
       ].join('\n'),
     });
     await context.artifacts.put({

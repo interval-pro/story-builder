@@ -27,7 +27,17 @@ export const CAPABILITIES = [
 
 export type Capability = (typeof CAPABILITIES)[number];
 
-export const EXECUTION_PHASES = ['RESEARCH', 'REVIEW', 'IMPLEMENTATION', 'QA', 'FINAL_REPORT', 'INTEGRATION', 'PUSH'] as const;
+export const EXECUTION_PHASES = [
+  'INTAKE',
+  'RESEARCH',
+  'REVIEW',
+  'IMPLEMENTATION',
+  'QA',
+  'FINAL_REPORT',
+  'INTEGRATION',
+  'PUSH',
+  'CHAT',
+] as const;
 export type ExecutionPhase = (typeof EXECUTION_PHASES)[number];
 
 const READ_ONLY: Capability[] = [
@@ -42,6 +52,9 @@ const READ_ONLY: Capability[] = [
 ];
 
 export const PHASE_CAPABILITIES: Record<ExecutionPhase, Capability[]> = {
+  // Intake reads the repository to ask questions worth answering, and never
+  // writes: an idea is not yet a task and has no branch to write to.
+  INTAKE: [...READ_ONLY, 'web.research'],
   RESEARCH: [...READ_ONLY, 'web.research'],
   REVIEW: [...READ_ONLY, 'web.research'],
   IMPLEMENTATION: [
@@ -57,6 +70,20 @@ export const PHASE_CAPABILITIES: Record<ExecutionPhase, Capability[]> = {
   FINAL_REPORT: [...READ_ONLY],
   INTEGRATION: [...READ_ONLY, 'workspace.write', 'command.run', 'build.run', 'git.commit'],
   PUSH: [...READ_ONLY, 'git.commit', 'git.push', 'github.pull_request'],
+  // The chat window is the person's own terminal, opened in the project
+  // directory. Narrowing it would make it something else, so it is granted what
+  // they already have, and the cockpit says so where the chat is opened.
+  CHAT: [
+    ...READ_ONLY,
+    'web.research',
+    'workspace.write',
+    'command.run',
+    'build.run',
+    'dependencies.modify',
+    'database.execute_dev',
+    'services.start',
+    'git.commit',
+  ],
 };
 
 export function capabilitiesForPhase(phase: ExecutionPhase): Capability[] {

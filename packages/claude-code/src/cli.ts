@@ -41,6 +41,33 @@ export function readUsage(raw: Record<string, unknown>): ClaudeResult['usage'] {
   };
 }
 
+/**
+ * What the stream has reported spending so far.
+ *
+ * Every assistant event carries the usage of that turn, so a run that never
+ * reaches its result still knows what it cost. This is the only way a timeout
+ * reports anything at all: the final payload is where usage normally comes from,
+ * and a killed process never prints one. Before this, a run that burned an hour
+ * of context and was then killed recorded zero, which is how fifteen of
+ * thirty-one runs came to show nothing.
+ *
+ * The numbers are per turn and disjoint, so they are summed.
+ */
+export function accumulateStreamUsage(
+  total: ClaudeResult['usage'],
+  event: ClaudeStreamEvent,
+): ClaudeResult['usage'] {
+  const message = event.message as { usage?: Record<string, number> } | undefined;
+  if (event.type !== 'assistant' || !message?.usage) return total;
+  const turn = readUsage({ usage: message.usage });
+  return {
+    inputTokens: total.inputTokens + turn.inputTokens,
+    outputTokens: total.outputTokens + turn.outputTokens,
+    cacheReadTokens: total.cacheReadTokens + turn.cacheReadTokens,
+    cacheCreationTokens: total.cacheCreationTokens + turn.cacheCreationTokens,
+  };
+}
+
 function toResult(raw: Record<string, unknown>, toolUses: ClaudeToolUse[], transcript: string): ClaudeResult {
   return {
     text: typeof raw['result'] === 'string' ? raw['result'] : '',
@@ -83,15 +110,37 @@ export function runClaudeCli(options: ClaudeCliOptions): Promise<ClaudeResult> {
     const toolUses: ClaudeToolUse[] = [];
     const transcript: string[] = [];
     let settled = false;
+    let streamUsage: ClaudeResult['usage'] = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    };
+    // The session the run is in, known before anything is printed: either we
+    // named it or the stream says so. A failure carries it so the next attempt
+    // can continue rather than start again from nothing.
+    let streamSessionId = options.resumeSessionId ?? options.sessionId ?? null;
 
     const timer = setTimeout(() => {
       settled = true;
       child.kill('SIGKILL');
-      reject(new AppError('claude_cli_timeout', `The Claude CLI did not finish within ${options.timeoutMs}ms`, 504));
+      reject(
+        new AppError('claude_cli_timeout', `The Claude CLI did not finish within ${options.timeoutMs}ms`, 504, {
+          // Whatever the stream had already reported. A killed run spent this
+          // much whether or not it ever produced an answer.
+          sessionId: streamSessionId,
+          usage: streamUsage,
+          costUsd: null,
+          modelUsage: null,
+          subagentStats: null,
+        }),
+      );
     }, options.timeoutMs);
 
     const handleEvent = (event: ClaudeStreamEvent): void => {
       if (event.type === 'result') finalRaw = event as unknown as Record<string, unknown>;
+      if (event.session_id) streamSessionId = event.session_id;
+      streamUsage = accumulateStreamUsage(streamUsage, event);
       for (const block of event.message?.content ?? []) {
         if (block.type === 'tool_use' && block.id && block.name) {
           toolUses.push({ id: block.id, name: block.name, input: block.input ?? {} });
@@ -150,7 +199,12 @@ export function runClaudeCli(options: ClaudeCliOptions): Promise<ClaudeResult> {
 
       if (!finalRaw) {
         reject(
-          new AppError('claude_cli_failed', `The Claude CLI exited with ${code} and produced no result: ${stderr.slice(0, 2000)}`, 502),
+          new AppError(
+            'claude_cli_failed',
+            `The Claude CLI exited with ${code} and produced no result: ${stderr.slice(0, 2000)}`,
+            502,
+            { sessionId: streamSessionId, usage: streamUsage, costUsd: null, modelUsage: null, subagentStats: null },
+          ),
         );
         return;
       }

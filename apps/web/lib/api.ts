@@ -25,23 +25,17 @@ export const api = {
     request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) }),
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PUT', body: body === undefined ? undefined : JSON.stringify(body) }),
+  delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 };
 
-export interface Task {
-  id: string;
-  state: string;
-  riskLevel: string | null;
-  branchName: string;
-  baseBranch: string;
-  baseCommit: string;
-  qaIteration: number;
-  blockedReason: string | null;
-  failureReason: string | null;
-  baseMoved: boolean;
-  projectId: string;
-  createdAt: string;
-}
-
+/**
+ * The cockpit keeps its own copy of these shapes rather than importing the
+ * domain package.
+ *
+ * It is a standalone Next application on purpose: its build traces only itself,
+ * which is what keeps a cockpit rebuild from walking the whole monorepo. The cost
+ * is this file, and the cost is worth paying.
+ */
 export interface Project {
   id: string;
   name: string;
@@ -49,6 +43,33 @@ export interface Project {
   defaultBranch: string;
   remoteUrl: string | null;
   kind: 'PROJECT' | 'INSTALLATION';
+  description: string | null;
+  setupState: 'PENDING' | 'RUNNING' | 'READY' | 'FAILED';
+  setupError: string | null;
+  createdAt: string;
+  taskCounts?: Record<string, number>;
+  knowledgeSnapshot?: { sequence: number; gitCommit: string } | null;
+  runtimeManifest?: { version: number; validated: boolean } | null;
+}
+
+export interface Task {
+  id: string;
+  projectId: string;
+  storyId: string;
+  state: string;
+  riskLevel: string | null;
+  size: string | null;
+  branchName: string;
+  baseBranch: string;
+  baseCommit: string;
+  qaIteration: number;
+  blockedReason: string | null;
+  failureReason: string | null;
+  baseMoved: boolean;
+  createdAt: string;
+  updatedAt: string;
+  projectName?: string;
+  storyTitle?: string;
 }
 
 export interface Story {
@@ -59,6 +80,56 @@ export interface Story {
   tasks: Task[];
 }
 
+export interface StoryDraft {
+  id: string;
+  projectId: string;
+  sessionId: string | null;
+  title: string;
+  body: string;
+  rationale: string;
+  sequence: number;
+  status: 'DRAFT' | 'LAUNCHED' | 'DISCARDED';
+  taskId: string | null;
+  createdAt: string;
+}
+
+export interface IdeaOption {
+  key: string;
+  label: string;
+  detail: string;
+}
+
+export interface IdeaQuestion {
+  id: string;
+  round: number;
+  sequence: number;
+  question: string;
+  rationale: string;
+  options: IdeaOption[];
+  chosenKey: string | null;
+  customAnswer: string | null;
+  answeredAt: string | null;
+}
+
+export interface IdeaSession {
+  id: string;
+  projectId: string;
+  idea: string;
+  status: 'QUEUED' | 'THINKING' | 'ASKING' | 'READY' | 'FAILED' | 'DISCARDED';
+  understanding: string | null;
+  round: number;
+  error: string | null;
+  createdAt: string;
+}
+
+export interface ReviewBrief {
+  headline: string;
+  approach: string;
+  changes: string[];
+  watchOut: string[];
+  effort: string;
+}
+
 export interface ReviewSection {
   key: string;
   title: string;
@@ -67,12 +138,14 @@ export interface ReviewSection {
 
 export interface ReviewDocument {
   summary: string;
+  brief: ReviewBrief | null;
   sections: ReviewSection[];
   implementationSteps: { order: number; title: string; detail: string; files: string[] }[];
   expectedFiles: string[];
   expectedSymbols: string[];
   riskSignals: { indicator: string; evidence: string }[];
   openQuestions: string[];
+  decisions: unknown[];
 }
 
 export interface ReviewVersion {
@@ -100,42 +173,172 @@ export interface SectionDiff {
   after: string;
 }
 
-/** Human readable label for each lifecycle state. */
-export const STATE_LABELS: Record<string, string> = {
-  DRAFT: 'Draft',
-  ANALYSIS_QUEUED: 'Analysis queued',
-  ANALYZING: 'Researching the repository',
-  REVIEW_READY: 'Engineering review ready',
-  REVIEW_FEEDBACK_RECEIVED: 'Notes received',
-  REVIEW_REGENERATING: 'Regenerating the review',
-  REVIEW_APPROVED: 'Review approved',
-  HIGH_RISK_CONFIRMATION_REQUIRED: 'High risk: execution approval required',
-  IMPLEMENTATION_QUEUED: 'Implementation queued',
-  IMPLEMENTING: 'Implementing',
-  QA_QUEUED: 'QA queued',
-  QA_RUNNING: 'QA running',
-  FIX_REQUIRED: 'Fix required',
-  FIXING: 'Fixing',
-  BLOCKED: 'Blocked, needs a decision',
-  FINAL_REVIEW_READY: 'Final report ready',
-  PR_APPROVAL_REQUIRED: 'Pull request approval required',
-  INTEGRATION_VALIDATION: 'Integration validation',
-  PUSHING: 'Pushing',
-  PR_CREATED: 'Pull request created',
-  COMPLETED: 'Completed',
-  WAITING_FOR_TASK: 'Waiting for another task',
-  PAUSING: 'Pausing',
-  PAUSED: 'Paused',
-  STOPPING: 'Stopping',
-  STOPPED: 'Stopped',
-  FAILED: 'Failed',
-  ROLLING_BACK: 'Rolling back',
-  ROLLED_BACK: 'Rolled back',
-};
+export interface DecisionOption {
+  key: string;
+  label: string;
+  detail: string;
+  consequence: string;
+  recommended: boolean;
+}
 
-export function stateTone(state: string): 'waiting' | 'running' | 'done' | 'attention' {
-  if (['COMPLETED', 'PR_CREATED'].includes(state)) return 'done';
-  if (['BLOCKED', 'FAILED', 'HIGH_RISK_CONFIRMATION_REQUIRED', 'FIX_REQUIRED', 'STOPPED'].includes(state)) return 'attention';
-  if (state.endsWith('_QUEUED') || ['PAUSED', 'DRAFT', 'WAITING_FOR_TASK'].includes(state)) return 'waiting';
-  return 'running';
+export interface Decision {
+  id: string;
+  key: string;
+  question: string;
+  detail: string;
+  blocking: boolean;
+  options: DecisionOption[];
+  status: 'OPEN' | 'ANSWERED';
+  chosenKey: string | null;
+  customAnswer: string | null;
+  answeredAt: string | null;
+}
+
+export interface QueueEntry {
+  id: string;
+  jobType: string;
+  status: string;
+  position: string;
+  consumesSlot: boolean;
+  heldAt: string | null;
+  attempt: number;
+  maxAttempts: number;
+  availableAt: string;
+  createdAt: string;
+  lockedAt: string | null;
+  lastError: string | null;
+  taskId: string | null;
+  taskState: string | null;
+  projectId: string | null;
+  projectName: string | null;
+  storyTitle: string | null;
+}
+
+export interface WaitingTask {
+  taskId: string;
+  projectId: string;
+  projectName: string;
+  storyTitle: string;
+  state: string;
+  since: string;
+  openDecisions: number;
+  blockedReason: string | null;
+}
+
+export interface QueueView {
+  entries: QueueEntry[];
+  waiting: WaitingTask[];
+  policy: { concurrency: number; paused: boolean; runningSlots: number };
+  running: number;
+  pending: number;
+}
+
+export interface TaskStep {
+  key: string;
+  label: string;
+  purpose: string;
+  status: 'PENDING' | 'RUNNING' | 'WAITING' | 'DONE' | 'BLOCKED' | 'FAILED' | 'SKIPPED';
+  startedAt: string | null;
+  finishedAt: string | null;
+  durationMs: number | null;
+  detail: string;
+  runIds: string[];
+  needsYou: boolean;
+}
+
+export interface TaskProgress {
+  steps: TaskStep[];
+  currentIndex: number;
+  percent: number;
+  currentForMs: number | null;
+  elapsedMs: number | null;
+}
+
+export interface RunUsage {
+  id: string;
+  phase: string;
+  agentType: string;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
+  durationMs: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheCreationTokens: number | null;
+  totalTokens: number;
+  resumed: boolean | null;
+  effort: string | null;
+  model: string | null;
+  sessionId: string | null;
+  errorMessage: string | null;
+}
+
+export interface TaskUsage {
+  totalTokens: number;
+  runs: number;
+  unrecordedRuns: number;
+  byAgent: { agentType: string; runs: number; tokens: number; unrecorded: number }[];
+  byRun: RunUsage[];
+}
+
+export interface UsageView {
+  window: {
+    hours: number;
+    since: string;
+    until: string;
+    usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number };
+    totalTokens: number;
+    runs: number;
+    unrecordedRuns: number;
+    failedRuns: number;
+    byAgent: { agentType: string; runs: number; totalTokens: number; unrecordedRuns: number; failedRuns: number }[];
+  };
+  week: {
+    since: string;
+    until: string;
+    usedTokens: number;
+    usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number };
+    runs: number;
+    unrecordedRuns: number;
+    budgetTokens: number | null;
+    percentOfBudget: number | null;
+    reportedLimit: Record<string, unknown> | null;
+  };
+  provenance: { perRun: string; window: string; limit: string };
+}
+
+export interface SettingDescriptor {
+  key: string;
+  label: string;
+  help: string;
+  kind: 'text' | 'secret' | 'integer' | 'boolean' | 'choice';
+  defaultValue: string;
+  choices?: { value: string; label: string; help: string }[];
+  min?: number;
+  max?: number;
+  group: string;
+  value: string;
+  isSet: boolean;
+  source: 'stored' | 'environment' | 'default';
+}
+
+export interface ChatSession {
+  id: string;
+  projectId: string;
+  title: string;
+  permissionMode: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  sequence: number;
+  role: 'user' | 'assistant';
+  content: string;
+  status: 'PENDING' | 'STREAMING' | 'COMPLETE' | 'FAILED';
+  toolCalls: { name: string; input: Record<string, unknown> }[];
+  error: string | null;
+  createdAt: string;
 }

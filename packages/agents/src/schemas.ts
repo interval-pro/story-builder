@@ -4,6 +4,10 @@ import {
   REVIEW_SECTION_TITLES,
   type ImplementationStep,
   type QaFinding,
+  type QaNote,
+  type ReviewBrief,
+  type ReviewDecision,
+  type ReviewDecisionOption,
   type ReviewDocument,
   type ReviewPatch,
   type ReviewSectionKey,
@@ -104,6 +108,95 @@ function readRiskSignals(value: unknown): { indicator: string; evidence: string 
 }
 
 /**
+ * The short version of the review.
+ *
+ * Absent is a real answer rather than an error: a document written before the
+ * brief existed has none, and the validator's job is to say what arrived, not to
+ * invent a headline. `validateReviewDocument` in the domain is what reports an
+ * empty brief as a gap.
+ */
+function readBrief(value: unknown): ReviewBrief | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  return {
+    headline: asString(record['headline']).trim(),
+    approach: asString(record['approach']).trim(),
+    changes: asStringArray(record['changes']),
+    watchOut: asStringArray(record['watchOut']),
+    effort: asString(record['effort']).trim(),
+  };
+}
+
+/** A decision's option keys are made stable here rather than trusted. */
+function readDecisionOptions(value: unknown): ReviewDecisionOption[] {
+  const raw = Array.isArray(value) ? (value as unknown[]) : [];
+  return raw
+    .map((entry, index) => {
+      const item = asRecord(entry, 'Decision option');
+      return {
+        key: asString(item['key']).trim() || `option-${index + 1}`,
+        label: asString(item['label']).trim(),
+        detail: asString(item['detail']).trim(),
+        consequence: asString(item['consequence']).trim(),
+        recommended: Boolean(item['recommended']),
+      };
+    })
+    .filter((option) => option.label.length > 0);
+}
+
+/**
+ * Questions the review is handing to a person.
+ *
+ * The key is what survives a regeneration, so an answer given against version 2
+ * is still recognised in version 3. The agent is asked for one; a missing key is
+ * derived from the question text rather than from the position in the list,
+ * because the position changes and the question usually does not.
+ */
+function readDecisions(value: unknown): ReviewDecision[] {
+  const raw = Array.isArray(value) ? (value as unknown[]) : [];
+  const decisions = raw
+    .map((entry) => {
+      const item = asRecord(entry, 'Decision');
+      const question = asString(item['question']).trim();
+      const explicitKey = asString(item['key']).trim();
+      return {
+        key: explicitKey || slugKey(question),
+        question,
+        detail: asString(item['detail']).trim(),
+        blocking: Boolean(item['blocking']),
+        options: readDecisionOptions(item['options']),
+      };
+    })
+    .filter((decision) => decision.question.length > 0);
+
+  // Keys are unique per review version in the database, and two questions that
+  // reduce to the same slug would make the insert fail and take the whole review
+  // run with it. The first one keeps the key; a later collision is suffixed
+  // rather than dropped, because a question nobody sees is worse than an ugly key.
+  const seen = new Set<string>();
+  return decisions.map((decision) => {
+    if (!seen.has(decision.key)) {
+      seen.add(decision.key);
+      return decision;
+    }
+    let suffix = 2;
+    while (seen.has(`${decision.key}-${suffix}`)) suffix += 1;
+    const key = `${decision.key}-${suffix}`;
+    seen.add(key);
+    return { ...decision, key };
+  });
+}
+
+function slugKey(text: string): string {
+  const slug = text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+  return slug || 'decision';
+}
+
+/**
  * The model returns sections as a flat object keyed by section id; anything it
  * invents outside the fixed section list is dropped.
  */
@@ -118,12 +211,14 @@ export function validateReviewDocument(value: unknown): ReviewDocument {
 
   return {
     summary: asString(record['summary']).trim(),
+    brief: readBrief(record['brief']),
     sections,
     implementationSteps: readImplementationSteps(record['implementationSteps']),
     expectedFiles: asStringArray(record['expectedFiles']),
     expectedSymbols: asStringArray(record['expectedSymbols']),
     riskSignals: readRiskSignals(record['riskSignals']),
     openQuestions: asStringArray(record['openQuestions']),
+    decisions: readDecisions(record['decisions']),
   };
 }
 
@@ -162,6 +257,9 @@ export function validateReviewPatch(value: unknown): ReviewPatch {
   if (Array.isArray(record['expectedSymbols'])) patch.expectedSymbols = asStringArray(record['expectedSymbols']);
   if (Array.isArray(record['riskSignals'])) patch.riskSignals = readRiskSignals(record['riskSignals']);
   if (Array.isArray(record['openQuestions'])) patch.openQuestions = asStringArray(record['openQuestions']);
+  const brief = readBrief(record['brief']);
+  if (brief) patch.brief = brief;
+  if (Array.isArray(record['decisions'])) patch.decisions = readDecisions(record['decisions']);
 
   if (Object.keys(patch).length === 0) {
     throw new ValidationError(
@@ -175,6 +273,15 @@ export interface QaReport {
   verdict: 'APPROVED' | 'REJECTED' | 'BLOCKED';
   summary: string;
   findings: QaFinding[];
+  /**
+   * Remarks the run is not blocking on.
+   *
+   * They were being described in the summary prose, which meant the fix agent
+   * never saw them and the next iteration raised them again as if new. A note is
+   * not a finding: it does not reject the change and it does not have to be
+   * acted on. It does have to be written down.
+   */
+  notes: QaNote[];
   /** Set when the fix would change the approved scope and needs a human. */
   requiresSupplementalReview: boolean;
   supplementalReason: string;
@@ -216,10 +323,23 @@ export function validateQaReport(value: unknown): QaReport {
     };
   }).filter((finding) => finding.summary.length > 0);
 
+  const notesRaw = Array.isArray(record['notes']) ? (record['notes'] as unknown[]) : [];
+  const notes: QaNote[] = notesRaw
+    .map((entry) => {
+      const item = asRecord(entry, 'QA note');
+      return {
+        summary: asString(item['summary']).trim(),
+        detail: asString(item['detail']).trim(),
+        file: asString(item['file']).trim() || null,
+      };
+    })
+    .filter((note) => note.summary.length > 0);
+
   return {
     verdict: verdict as QaReport['verdict'],
     summary: asString(record['summary']),
     findings,
+    notes,
     requiresSupplementalReview: Boolean(record['requiresSupplementalReview']),
     supplementalReason: asString(record['supplementalReason']),
   };
@@ -303,3 +423,91 @@ export function validateLearningResult(value: unknown): LearningResult {
 }
 
 export type ReviewSectionMap = Partial<Record<ReviewSectionKey, string>>;
+
+export interface IntakeQuestion {
+  question: string;
+  rationale: string;
+  options: { key: string; label: string; detail: string }[];
+}
+
+export interface IntakeStory {
+  title: string;
+  body: string;
+  rationale: string;
+}
+
+export interface IntakeResult {
+  /** What the agent takes the idea to be, shown before any question is asked. */
+  understanding: string;
+  /** True when it has enough to write the stories and is not asking anything. */
+  ready: boolean;
+  questions: IntakeQuestion[];
+  stories: IntakeStory[];
+}
+
+/**
+ * What the intake agent returns.
+ *
+ * Asking and answering are the same shape on purpose: a round either produces
+ * questions or produces stories, and the caller decides what to do with whichever
+ * arrived rather than running two different agents.
+ *
+ * Options are capped at three. A question with eight options is a form, and the
+ * whole point of this step is that a person answers it with a click.
+ */
+export function validateIntakeResult(value: unknown): IntakeResult {
+  const record = asRecord(value, 'Intake result');
+  const questionsRaw = Array.isArray(record['questions']) ? (record['questions'] as unknown[]) : [];
+  const storiesRaw = Array.isArray(record['stories']) ? (record['stories'] as unknown[]) : [];
+
+  const questions: IntakeQuestion[] = questionsRaw
+    .map((entry) => {
+      const item = asRecord(entry, 'Intake question');
+      const optionsRaw = Array.isArray(item['options']) ? (item['options'] as unknown[]) : [];
+      const options = optionsRaw
+        .map((option, index) => {
+          const record_ = asRecord(option, 'Intake option');
+          return {
+            key: asString(record_['key']).trim() || `option-${index + 1}`,
+            label: asString(record_['label']).trim(),
+            detail: asString(record_['detail']).trim(),
+          };
+        })
+        .filter((option) => option.label.length > 0)
+        .slice(0, 3);
+      return {
+        question: asString(item['question']).trim(),
+        rationale: asString(item['rationale']).trim(),
+        options,
+      };
+    })
+    .filter((question) => question.question.length > 0 && question.options.length >= 2);
+
+  const stories: IntakeStory[] = storiesRaw
+    .map((entry) => {
+      const item = asRecord(entry, 'Intake story');
+      return {
+        title: asString(item['title']).trim(),
+        body: asString(item['body']).trim(),
+        rationale: asString(item['rationale']).trim(),
+      };
+    })
+    .filter((story) => story.title.length > 0 && story.body.length > 0);
+
+  // Readiness is what actually arrived, not what the agent claimed: a round with
+  // no stories cannot be ready however it labelled itself, and one that produced
+  // stories is finished whether or not it also asked something.
+  const ready = stories.length > 0;
+  if (!ready && questions.length === 0) {
+    throw new ValidationError(
+      'The intake produced neither a question to ask nor a story to run, so there is nothing to show.',
+    );
+  }
+
+  return {
+    understanding: asString(record['understanding']).trim(),
+    ready,
+    questions: ready ? [] : questions,
+    stories,
+  };
+}

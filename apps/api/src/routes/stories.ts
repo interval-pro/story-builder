@@ -1,10 +1,10 @@
 import { HttpRouter, ValidationError } from '@ai-engine/shared';
-import { actorFrom, primaryProjectId, requireBody, type ApiContext } from '../context';
+import { actorFrom, resolveProjectId, requireBody, type ApiContext } from '../context';
 
 /** Story creation and story revisions. A story is free text in v0. */
 export function registerStoryRoutes(router: HttpRouter, context: ApiContext): void {
   router.get('/api/stories', async ({ query }) => {
-    const projectId = await primaryProjectId(context, query.get('projectId'));
+    const projectId = await resolveProjectId(context, query.get('projectId'));
     const stories = await context.repos.stories.listByProject(projectId);
     const withTasks = await Promise.all(
       stories.map(async (story) => {
@@ -23,7 +23,7 @@ export function registerStoryRoutes(router: HttpRouter, context: ApiContext): vo
     if (input.body.trim().length < 10) {
       throw new ValidationError('A story needs at least a sentence of description');
     }
-    const projectId = await primaryProjectId(context, input.projectId ?? null);
+    const projectId = await resolveProjectId(context, input.projectId ?? null);
     const result = await context.commands.createStory({
       projectId,
       body: input.body,

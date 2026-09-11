@@ -1,5 +1,5 @@
 import { newId, NotFoundError } from '@ai-engine/shared';
-import type { Metric, QaFinding, QaRun, Sandbox, TestRun } from '@ai-engine/domain';
+import type { Metric, QaFinding, QaNote, QaRun, Sandbox, TestRun } from '@ai-engine/domain';
 import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
 
@@ -103,7 +103,7 @@ export class TestRunRepository {
   }
 }
 
-const QA_COLUMNS = 'id, task_id, run_id, iteration, verdict, findings, created_at';
+const QA_COLUMNS = 'id, task_id, run_id, iteration, verdict, findings, notes, created_at';
 
 export class QaRunRepository {
   constructor(private readonly db: Queryable) {}
@@ -114,11 +114,25 @@ export class QaRunRepository {
     iteration: number;
     verdict: QaRun['verdict'];
     findings: QaFinding[];
+    /**
+     * Remarks the run did not block on. They used to be described in the summary
+     * prose and then never written anywhere, so the agent that could have acted
+     * on them never saw them.
+     */
+    notes?: QaNote[];
   }): Promise<QaRun> {
     const row = await this.db.queryOne(
-      `INSERT INTO qa_runs (id, task_id, run_id, iteration, verdict, findings)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${QA_COLUMNS}`,
-      [newId(), input.taskId, input.runId, input.iteration, input.verdict, JSON.stringify(input.findings)],
+      `INSERT INTO qa_runs (id, task_id, run_id, iteration, verdict, findings, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${QA_COLUMNS}`,
+      [
+        newId(),
+        input.taskId,
+        input.runId,
+        input.iteration,
+        input.verdict,
+        JSON.stringify(input.findings),
+        JSON.stringify(input.notes ?? []),
+      ],
     );
     return camelize<QaRun>(row!);
   }

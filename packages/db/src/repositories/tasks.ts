@@ -1,5 +1,5 @@
 import { newId, NotFoundError } from '@ai-engine/shared';
-import type { RiskLevel, Task, TaskState } from '@ai-engine/domain';
+import { HUMAN_GATE_STATES, type RiskLevel, type Task, type TaskState } from '@ai-engine/domain';
 import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
 
@@ -78,6 +78,100 @@ export class TaskRepository {
         [projectId],
       ),
     );
+  }
+
+  /**
+   * Tasks that are genuinely in flight anywhere: a job of theirs is pending or
+   * running.
+   *
+   * This is what "still running" has to mean. The older reading — anything not
+   * in a terminal state — counted a review waiting for approval and a task that
+   * had been blocked for a day, which is how an engine update came to be refused
+   * with the words "tasks are still running" while nothing was running at all.
+   */
+  async listWithActiveJobs(): Promise<(Task & { projectName: string; storyTitle: string })[]> {
+    return camelizeAll<Task & { projectName: string; storyTitle: string }>(
+      await this.db.query(
+        `SELECT ${COLUMNS.split(',').map((column) => `t.${column.trim()}`).join(', ')},
+                p.name AS project_name, s.title AS story_title
+           FROM tasks t
+           JOIN projects p ON p.id = t.project_id
+           JOIN stories s ON s.id = t.story_id
+          WHERE EXISTS (
+            SELECT 1 FROM jobs j WHERE j.task_id = t.id AND j.status IN ('PENDING', 'RUNNING')
+          )
+          ORDER BY t.created_at ASC`,
+      ),
+    );
+  }
+
+  /**
+   * Tasks that cannot move until a person acts, across every project.
+   *
+   * The cockpit shows these separately from the queue, because they are not
+   * waiting for a machine and no amount of concurrency will clear them.
+   */
+  async listWaitingForHuman(): Promise<(Task & { projectName: string; storyTitle: string })[]> {
+    return camelizeAll<Task & { projectName: string; storyTitle: string }>(
+      await this.db.query(
+        `SELECT ${COLUMNS.split(',').map((column) => `t.${column.trim()}`).join(', ')},
+                p.name AS project_name, s.title AS story_title
+           FROM tasks t
+           JOIN projects p ON p.id = t.project_id
+           JOIN stories s ON s.id = t.story_id
+          WHERE t.state = ANY($1::text[])
+          ORDER BY t.updated_at ASC`,
+        [[...HUMAN_GATE_STATES]],
+      ),
+    );
+  }
+
+  /** Tasks with an agent actually working on them, for the overview. */
+  async listRunning(): Promise<(Task & { projectName: string; storyTitle: string })[]> {
+    return camelizeAll<Task & { projectName: string; storyTitle: string }>(
+      await this.db.query(
+        `SELECT ${COLUMNS.split(',').map((column) => `t.${column.trim()}`).join(', ')},
+                p.name AS project_name, s.title AS story_title
+           FROM tasks t
+           JOIN projects p ON p.id = t.project_id
+           JOIN stories s ON s.id = t.story_id
+          WHERE t.state NOT IN ('COMPLETED', 'STOPPED', 'ROLLED_BACK', 'DRAFT', 'PAUSED', 'FAILED')
+            AND t.state <> ALL($1::text[])
+          ORDER BY t.updated_at DESC`,
+        [[...HUMAN_GATE_STATES]],
+      ),
+    );
+  }
+
+  /** A project's tasks with the story title, which is what a list ever shows. */
+  async listByProjectWithStory(
+    projectId: string,
+    limit = 100,
+  ): Promise<(Task & { projectName: string; storyTitle: string })[]> {
+    return camelizeAll<Task & { projectName: string; storyTitle: string }>(
+      await this.db.query(
+        `SELECT ${COLUMNS.split(',').map((column) => `t.${column.trim()}`).join(', ')},
+                p.name AS project_name, s.title AS story_title
+           FROM tasks t
+           JOIN projects p ON p.id = t.project_id
+           JOIN stories s ON s.id = t.story_id
+          WHERE t.project_id = $1
+          ORDER BY t.created_at DESC
+          LIMIT $2`,
+        [projectId, limit],
+      ),
+    );
+  }
+
+  /** Counts per state for one project, for the overview tiles. */
+  async countsByState(projectId: string): Promise<Record<string, number>> {
+    const rows = await this.db.query<{ state: string; count: string }>(
+      'SELECT state, COUNT(*)::text AS count FROM tasks WHERE project_id = $1 GROUP BY state',
+      [projectId],
+    );
+    const counts: Record<string, number> = {};
+    for (const row of rows) counts[row.state] = Number(row.count);
+    return counts;
   }
 
   async listByState(state: TaskState): Promise<Task[]> {

@@ -1,6 +1,7 @@
 import { access, realpath, rm, mkdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import path from 'node:path';
-import { createLogger } from '@ai-engine/shared';
+import { createLogger, workspacesRootProblem } from '@ai-engine/shared';
 import { GitClient } from './git-client';
 
 const logger = createLogger('git-worktree');
@@ -28,6 +29,13 @@ export class WorktreeManager {
     this.repositoryPath = repositoryPath;
     this.workspacesRoot = workspacesRoot;
     this.git = new GitClient(repositoryPath);
+
+    // Refused here rather than discovered four fix cycles later: an agent whose
+    // worktree sits somewhere the CLI treats as sensitive reads everything,
+    // writes nothing, and reports honestly that it implemented nothing. The
+    // fix cycle cannot fix a permission, so it simply repeats.
+    const problem = workspacesRootProblem(workspacesRoot, homedir());
+    if (problem) throw new Error(problem);
   }
 
   workspacePathFor(taskId: string): string {

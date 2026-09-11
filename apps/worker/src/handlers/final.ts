@@ -1,5 +1,6 @@
 import { renderFinalReport, suggestCommits, validateImplementationOutcome, type ImplementationOutcome } from '@ai-engine/agents';
 import { AppError } from '@ai-engine/shared';
+import { carryOpenFindings } from '@ai-engine/domain';
 import { changedFiles, fullDiff, GitClient } from '@ai-engine/git';
 import { workspacePathFor, type JobContext } from '../job-context';
 
@@ -29,9 +30,23 @@ export async function handleFinalReport(context: JobContext): Promise<void> {
   const lastTest = tests[tests.length - 1] ?? null;
   const qaRuns = await context.repos.qaRuns.listByTask(context.task.id);
   const lastQa = qaRuns[qaRuns.length - 1] ?? null;
+
+  // Resolved is everything raised that is not still open, worked out the same way
+  // the fix cycle works it out. Taking "every iteration but the last" was close
+  // enough while findings were replaced wholesale; now that they accumulate, a
+  // finding raised in iteration one and still open in iteration three would have
+  // been reported as both resolved and open in the same document.
+  const runs = await context.repos.runs.listByTask(context.task.id);
+  const openFindings = carryOpenFindings({
+    qaRuns,
+    fixTimes: runs
+      .filter((run) => run.phase === 'IMPLEMENTATION' && run.finishedAt)
+      .map((run) => run.finishedAt as string),
+  });
+  const stillOpen = new Set(openFindings.map((finding) => `${finding.file ?? ''}::${finding.summary}`));
   const resolvedFindings = qaRuns
-    .slice(0, -1)
     .flatMap((run) => run.findings)
+    .filter((finding) => !stillOpen.has(`${finding.file ?? ''}::${finding.summary}`))
     .map((finding) => ({ ...finding, status: 'RESOLVED' as const }));
 
   const remainingRisks = [
@@ -48,7 +63,7 @@ export async function handleFinalReport(context: JobContext): Promise<void> {
     changes,
     buildResult: null,
     testResult: lastTest ? { command: lastTest.command, exitCode: lastTest.exitCode } : null,
-    qaFindings: lastQa?.verdict === 'APPROVED' ? [] : (lastQa?.findings ?? []),
+    qaFindings: lastQa?.verdict === 'APPROVED' ? [] : openFindings,
     resolvedFindings,
     qaIterations: qaRuns.length,
     migrationResult: null,

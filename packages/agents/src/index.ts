@@ -3,6 +3,7 @@ export * from './runner';
 export * from './context';
 export * from './schemas';
 export * from './prompts/prompt-loader';
+export * from './agents/intake-agent';
 export * from './agents/research-agent';
 export * from './agents/review-agent';
 export * from './agents/implementation-agent';

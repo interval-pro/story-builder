@@ -8,3 +8,7 @@ export * from './entities';
 export * from './impact';
 export * from './task-size';
 export * from './run-resume';
+export * from './task-progress';
+export * from './usage';
+export * from './settings';
+export * from './qa-findings';

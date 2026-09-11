@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { Database, createRepositories } from '@ai-engine/db';
 import { TaskCommands } from '@ai-engine/orchestrator';
 import { failure, heading, info, success, table } from '../output';
+import { resolveProject } from '../project';
 
 /** Creates a story from the command line, against the project or the installation. */
 export async function storyCreateCommand(options: {
@@ -9,6 +10,7 @@ export async function storyCreateCommand(options: {
   file?: string;
   title?: string;
   installation?: boolean;
+  project?: string | undefined;
 }): Promise<number> {
   const db = new Database();
   try {
@@ -18,17 +20,8 @@ export async function storyCreateCommand(options: {
       return 1;
     }
     const repos = createRepositories(db);
-    const project = options.installation
-      ? await repos.projects.findInstallation()
-      : await repos.projects.findPrimary();
-    if (!project) {
-      failure(
-        options.installation
-          ? 'This installation is not registered as a project. Run "ai-engine init" again.'
-          : 'No project is registered. Run "ai-engine init" first.',
-      );
-      return 1;
-    }
+    const project = await resolveProject(repos, options);
+    if (!project) return 1;
     const commands = new TaskCommands(db);
     const result = await commands.createStory({
       projectId: project.id,
@@ -52,15 +45,12 @@ export async function storyCreateCommand(options: {
   }
 }
 
-export async function taskListCommand(): Promise<number> {
+export async function taskListCommand(options: { project?: string | undefined } = {}): Promise<number> {
   const db = new Database();
   try {
     const repos = createRepositories(db);
-    const project = await repos.projects.findPrimary();
-    if (!project) {
-      failure('No project is registered.');
-      return 1;
-    }
+    const project = await resolveProject(repos, options);
+    if (!project) return 1;
     const tasks = await repos.tasks.listByProject(project.id, 50);
     heading(`Tasks (${tasks.length})`);
     for (const task of tasks) {

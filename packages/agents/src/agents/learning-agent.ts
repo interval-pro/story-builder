@@ -13,6 +13,13 @@ export interface LearningAgentInput {
   reviewAfter: ReviewDocument | null;
   qaSummaries: string[];
   installRoot: string;
+  /**
+   * Fired with the session before the engine spawns. Every other phase passes
+   * this; this one did not, which made it the only agent whose death left no
+   * record of which conversation it died in.
+   */
+  onSessionStart?: (sessionId: string) => Promise<void> | void;
+  resumeSessionId?: string;
 }
 
 const RESULT_INSTRUCTION = `Produce a single JSON object with exactly this shape:
@@ -81,6 +88,8 @@ export async function runLearningAgent(
     maxIterations: 4,
     resultInstruction: RESULT_INSTRUCTION,
     validate: validateLearningResult,
+    ...(input.onSessionStart ? { onSessionStart: input.onSessionStart } : {}),
+    ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
   });
 
   return { result: outcome.result, outcome };

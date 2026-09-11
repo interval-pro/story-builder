@@ -14,10 +14,27 @@ for name in web worker orchestrator api; do
   fi
 done
 
-# Safety net. Matching on the command line is not enough: the Next server
-# renames its own process, so the ports are the reliable handle.
+# Safety net for a service whose pid file was lost, which is how two workers
+# came to run at once.
+#
+# pkill and pgrep are not usable here: on at least one macOS install they fail
+# with "sysmond service not found" and return non-zero without matching
+# anything, which made this whole sweep silently inert while reading as if it had
+# run. Parsing ps is uglier and actually works everywhere.
+sweep() {
+  local pattern="$1"
+  local pids
+  # No match makes grep exit non-zero, which under set -e would end the script
+  # before the ports are freed. Nothing to sweep is the normal case.
+  pids="$(ps -Ao pid=,command= | grep -F "$pattern" | grep -v -F 'grep' | awk '{print $1}' || true)"
+  for pid in $pids; do
+    if kill "$pid" 2>/dev/null; then
+      echo "swept $pattern ($pid)"
+    fi
+  done
+}
 for pattern in "apps/api/dist/main.js" "apps/orchestrator/dist/main.js" "apps/worker/dist/main.js" "apps/sandbox-manager/dist/main.js"; do
-  pkill -f "$pattern" 2>/dev/null && echo "swept $pattern" || true
+  sweep "$pattern"
 done
 
 for port in 3000 4000 4100; do

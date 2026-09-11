@@ -1,4 +1,13 @@
-import type { QaFinding, ReviewDocument, RuntimeManifestDocument, Story, StoryRevision, Task } from '@ai-engine/domain';
+import type {
+  QaFinding,
+  QaNote,
+  ReviewDecisionRecord,
+  ReviewDocument,
+  RuntimeManifestDocument,
+  Story,
+  StoryRevision,
+  Task,
+} from '@ai-engine/domain';
 import { renderReviewMarkdown } from '@ai-engine/domain';
 import { renderProjectContext, renderStoryContext, type ProjectContext } from '../context';
 import { loadAgentPrompt } from '../prompts/prompt-loader';
@@ -16,7 +25,20 @@ export interface ImplementationAgentInput {
   installRoot: string;
   /** Set when this run is a fix cycle rather than the first implementation. */
   qaFindings?: QaFinding[];
+  /**
+   * Remarks QA made without blocking on them. They are passed because the fix is
+   * the only moment anyone could act on them cheaply, and they were previously
+   * written nowhere at all.
+   */
+  qaNotes?: QaNote[];
   qaIteration?: number;
+  /**
+   * Decisions a person answered on the review.
+   *
+   * Without these the agent sees a plan with an open question in it and answers
+   * it itself, which is exactly what the decision gate exists to prevent.
+   */
+  decisions?: ReviewDecisionRecord[];
   maxIterations?: number;
   /** Continues the earlier implementation session during a fix cycle. */
   resumeSessionId?: string;
@@ -106,6 +128,41 @@ export async function runImplementationAgent(
     );
   } else {
     userParts.push('', 'Implement the approved plan, then run the build and the test suite.');
+  }
+
+  if (input.qaNotes && input.qaNotes.length > 0) {
+    userParts.push(
+      '',
+      '## Notes QA made without blocking on them',
+      '',
+      ...input.qaNotes.map((note) => `- ${note.summary}${note.file ? ` (${note.file})` : ''}${note.detail ? `: ${note.detail}` : ''}`),
+      '',
+      'Act on these only where doing so costs nothing extra. None of them justifies widening the scope,',
+      'and none of them is a reason to touch a file the plan does not name.',
+    );
+  }
+
+  if (input.decisions && input.decisions.length > 0) {
+    userParts.push(
+      '',
+      '## Decisions the human has made',
+      '',
+      ...input.decisions.map((decision) => {
+        const chosen = decision.options.find((option) => option.key === decision.chosenKey);
+        const answer =
+          decision.chosenKey === 'custom'
+            ? (decision.customAnswer ?? 'no answer recorded')
+            : decision.chosenKey === 'agent'
+              ? 'left to your judgement, with the reasons above'
+              : chosen
+                ? `${chosen.label} — ${chosen.detail}`
+                : (decision.customAnswer ?? 'no answer recorded');
+        return `- ${decision.question}\n  ${answer}`;
+      }),
+      '',
+      'These are settled. Implement them as decided, and do not revisit one because the code suggests',
+      'otherwise: say so as a discovered issue instead.',
+    );
   }
 
   const run = await input.runner.run({

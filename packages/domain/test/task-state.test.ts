@@ -115,3 +115,49 @@ test('states map to the phase whose capabilities they should get', () => {
   assert.equal(phaseForState('QA_RUNNING'), 'QA');
   assert.equal(phaseForState('REVIEW_READY'), null);
 });
+
+test('a blocked task can go back to the push without re-running an agent', () => {
+  // A push that fails blocks the task. Every other route out of BLOCKED runs an
+  // agent over work that was already finished, which is why the only reachable
+  // end used to be STOPPED and the branch had to be pushed by hand.
+  assert.equal(canTransition('BLOCKED', 'PUSHING'), true);
+  assert.equal(canTransition('BLOCKED', 'INTEGRATION_VALIDATION'), true);
+});
+
+test('a failed task can continue from the push or the integration it failed in', () => {
+  assert.equal(canTransition('FAILED', 'PUSHING'), true);
+  assert.equal(canTransition('FAILED', 'REVIEW_REGENERATING'), true);
+});
+
+test('the routes out of a blocked task all lead somewhere that can finish it', () => {
+  for (const target of transitionsFrom('BLOCKED')) {
+    // Nothing may lead back to BLOCKED itself, and every listed route has to be
+    // a state the machine can actually leave.
+    if (['PAUSING', 'STOPPING', 'FAILED'].includes(target)) continue;
+    assert.ok(transitionsFrom(target).length > 0, `${target} is a dead end`);
+  }
+});
+
+test('a push can finish without a pull request', () => {
+  // Not every finish goes through a pull request: a project with no remote
+  // finishes on a local branch, and an installation is never pushed at all. Both
+  // paths transitioned PUSHING -> COMPLETED and both threw, which failed the task
+  // after every piece of its work had succeeded.
+  assert.equal(canTransition('PUSHING', 'COMPLETED'), true);
+  assert.equal(canTransition('PUSHING', 'PR_CREATED'), true);
+});
+
+test('every state a handler transitions to from PUSHING is reachable', () => {
+  // The three endings the push handler writes: a pull request, a local branch or
+  // an installation candidate, and a block when the push itself failed.
+  for (const target of ['PR_CREATED', 'COMPLETED', 'BLOCKED'] as const) {
+    assert.equal(canTransition('PUSHING', target), true, target);
+  }
+});
+
+test('a retry can continue from the integration it failed in', () => {
+  // A task that failed after its pull request was approved failed in the
+  // integration or in the push. Sending it back to QA would re-run an agent over
+  // a diff that has already been checked and approved.
+  assert.equal(canTransition('FAILED', 'INTEGRATION_VALIDATION'), true);
+});

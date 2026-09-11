@@ -12,7 +12,19 @@ export function registerReviewRoutes(router: HttpRouter, context: ApiContext): v
     const current = versions[versions.length - 1];
     const previous = versions[versions.length - 2];
     const diff = current && previous ? diffReviewDocuments(previous.document, current.document) : [];
-    return { review, versions, notes, diff, current: current ?? null };
+    // The decisions live in their own rows rather than only inside the document,
+    // because that is what the approval gates on and what an answer is written
+    // against. The document's copy is the agent's output; these are the state.
+    const decisions = current ? await context.repos.reviewDecisions.listForVersion(current.id) : [];
+    return {
+      review,
+      versions,
+      notes,
+      diff,
+      decisions,
+      openBlockingDecisions: decisions.filter((decision) => decision.blocking && decision.status === 'OPEN').length,
+      current: current ?? null,
+    };
   });
 
   router.get('/api/tasks/:id/reviews', async ({ params }) => {

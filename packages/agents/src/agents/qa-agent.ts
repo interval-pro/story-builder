@@ -1,4 +1,4 @@
-import type { ReviewDocument, Story, StoryRevision, Task } from '@ai-engine/domain';
+import type { QaFinding, ReviewDocument, Story, StoryRevision, Task } from '@ai-engine/domain';
 import { renderReviewMarkdown } from '@ai-engine/domain';
 import { renderProjectContext, renderStoryContext, renderTestResults, type ProjectContext } from '../context';
 import { loadAgentPrompt } from '../prompts/prompt-loader';
@@ -23,6 +23,16 @@ export interface QaAgentInput {
    * purpose so it cannot see the reasoning behind the code it is judging.
    */
   resumeSessionId?: string;
+  /**
+   * Findings earlier iterations raised that are still open.
+   *
+   * Each iteration is a fresh context that sees only the diff, so without this it
+   * cannot know what the last one found. Two passes over nearly the same diff
+   * produced disjoint blocking findings once, which is the evidence that one pass
+   * does not find everything and that a finding dropped between iterations is a
+   * real loss rather than a tidy-up.
+   */
+  carriedFindings?: QaFinding[];
   onSessionStart?: (sessionId: string) => Promise<void> | void;
   onStep?: (step: AgentStep) => Promise<void> | void;
 }
@@ -41,9 +51,19 @@ const RESULT_INSTRUCTION = `Now produce your QA verdict as a single JSON object 
     "detail": "concrete failure scenario: inputs and state leading to the wrong outcome",
     "suggestedFix": "string"
   }],
+  "notes": [{
+    "summary": "one sentence: something worth knowing that you are not rejecting the change for",
+    "detail": "string",
+    "file": "path or null"
+  }],
   "requiresSupplementalReview": false,
   "supplementalReason": "string, only when the fix would change the approved scope"
 }
+
+A finding rejects the change. A note does not: it is something a person or the next fix should know
+about, and it is the right place for anything you would otherwise mention in the summary and then
+have no record of. Put it in "notes" rather than in the prose, because the summary is read once and
+the notes are carried forward.
 
 Return only the JSON object.`;
 
@@ -84,6 +104,20 @@ export async function runQaAgent(
     '## Test results',
     '',
     renderTestResults(input.testResults),
+    ...(input.carriedFindings && input.carriedFindings.length > 0
+      ? [
+          '',
+          '## Findings earlier iterations raised and nobody has resolved',
+          '',
+          ...input.carriedFindings.map(
+            (finding) => `- [${finding.severity}/${finding.category}] ${finding.summary}${finding.file ? ` (${finding.file})` : ''}`,
+          ),
+          '',
+          'Check each of these against the diff. Raise it again if it still stands, and say so in your',
+          'summary if it has been dealt with. A finding that disappears without either is how a verified',
+          'defect leaves the record.',
+        ]
+      : []),
     '',
     'Review this change independently. Verify the claims in the diff against the code itself.',
   ].join('\n');
