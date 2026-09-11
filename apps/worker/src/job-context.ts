@@ -1,7 +1,6 @@
-import { access, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { AppError, createLogger, loadConfig, type Logger } from '@ai-engine/shared';
 import {
+  SETTING_KEYS,
   capabilitiesForPhase,
   shouldResumeFailedRun,
   type ExecutionPhase,
@@ -12,9 +11,9 @@ import {
   type Task,
   type TaskSize,
 } from '@ai-engine/domain';
-import { createRepositories, type Database, type Repositories, type RunCompletion } from '@ai-engine/db';
+import { createRepositories, type Database, type Repositories, type RunCompletion, type ScopedSettings } from '@ai-engine/db';
 import { EventLog } from '@ai-engine/events';
-import { FilesystemArtifactStore, type ArtifactStore } from '@ai-engine/artifacts';
+import { DatabaseArtifactStore, type ArtifactStore } from '@ai-engine/artifacts';
 import { createProviderOrMock } from '@ai-engine/ai-provider';
 import { ALL_TOOLS, LocalCommandExecutor, SandboxCommandExecutor, ToolRegistry, toolPolicyVersion, type CommandExecutor, type ToolContext } from '@ai-engine/tools';
 import { ClaudeCodeAgentRunner } from '@ai-engine/claude-code';
@@ -35,6 +34,12 @@ export interface JobContext {
   knowledge: KnowledgeService;
   secrets: SecretsService;
   logger: Logger;
+  /**
+   * Settings as this project sees them: its own value if it set one, the
+   * installation's otherwise. Everything in a job reads settings for one
+   * project, so the scope is resolved once here rather than at each call.
+   */
+  settings: ScopedSettings;
   workerId: string;
   /** Where the engine itself lives: its prompts, policies and state. */
   installRoot: string;
@@ -62,11 +67,12 @@ export async function buildJobContext(input: {
     repos,
     events: new EventLog(input.db),
     orchestrator: new Orchestrator(input.db),
-    artifacts: new FilesystemArtifactStore(input.db),
+    artifacts: new DatabaseArtifactStore(input.db),
     brain: new ProjectBrain(input.db),
     knowledge: new KnowledgeService(input.db),
     secrets: new SecretsService(),
     logger: input.logger.child({ taskId: task.id, jobType: input.job.jobType }),
+    settings: repos.settings.forProject(project.id),
     workerId: input.workerId,
     installRoot: loadConfig().paths.installRoot,
     job: input.job,
@@ -105,28 +111,32 @@ const EFFORT_BY_SIZE: Record<TaskSize, 'low' | 'medium' | 'high'> = {
   LARGE: 'high',
 };
 
-export function workspacePathFor(taskId: string): string {
-  return path.join(loadConfig().paths.workspacesRoot, `task-${taskId}`);
-}
-
 /**
- * Where this task's artifacts live, matching the layout the artifact store
- * writes. It sits outside the worktree, so an agent only reaches it when the
- * phase is given it explicitly.
+ * Where an agent works: the project's own directory.
+ *
+ * There are no worktrees. A story takes the directory, works on its own branch
+ * and gives it back; the queue guarantees only one story holds it at a time. What
+ * this removes is a full copy of the repository and its dependencies per task,
+ * which was the entire disk cost of the system.
  */
-export function taskArtifactsPathFor(projectId: string, taskId: string): string {
-  return path.join(loadConfig().paths.artifactsRoot, projectId, taskId);
+export function projectPathFor(context: { project: { repoPath: string } }): string {
+  return context.project.repoPath;
 }
 
 /**
  * Workers never talk to Docker. When sandboxing is enabled every command goes
  * through the sandbox manager; otherwise it runs locally in the worktree.
  */
-export function createExecutor(taskId: string): CommandExecutor {
-  const config = loadConfig();
-  return config.sandbox.enabled
-    ? new SandboxCommandExecutor(config.service.sandboxManagerUrl, taskId)
-    : new LocalCommandExecutor(workspacePathFor(taskId));
+/**
+ * Commands run in the project directory, on the story's branch.
+ *
+ * The Docker sandbox mounted a worktree; with no worktree there is nothing to
+ * mount, so it is not reachable from here any more. The isolation that remains is
+ * the branch: everything an agent does is committed to it and nothing touches the
+ * work branch until a merge someone asked for.
+ */
+export function createExecutor(repoPath: string): CommandExecutor {
+  return new LocalCommandExecutor(repoPath);
 }
 
 /**
@@ -180,10 +190,10 @@ export async function createToolEnvironment(input: {
     projectId: context.project.id,
     taskId: context.task.id,
     runId,
-    workspacePath: workspacePathFor(context.task.id),
+    workspacePath: context.project.repoPath,
     phase,
     capabilities: capabilitiesForPhase(phase),
-    executor: createExecutor(context.task.id),
+    executor: createExecutor(context.project.repoPath),
     artifacts: context.artifacts,
     logger: context.logger,
     secretValues: context.secrets.knownValues(),
@@ -236,16 +246,19 @@ export async function createAgentRunner(input: {
   const { context, runId, phase } = input;
 
   if (config.agents.engine === 'claude-code') {
+    // The project's model, then the installation's, then whatever the CLI
+    // defaults to. A project on a slower model is a per-project decision.
+    const model = (await context.settings.raw(SETTING_KEYS.claudeModel)) ?? config.agents.claudeModel;
     const audit = createToolAuditSink(context, runId, phase);
     return new ClaudeCodeAgentRunner({
-      workspacePath: workspacePathFor(context.task.id),
+      workspacePath: context.project.repoPath,
       timeoutMs: config.agents.claudeTimeoutMs,
       resultTimeoutMs: config.agents.claudeResultTimeoutMs,
       binary: config.agents.claudeBinary,
       allowSubagents: config.agents.allowSubagents,
       ...(input.additionalDirectories?.length ? { additionalDirectories: input.additionalDirectories } : {}),
       ...(input.size ? { effort: EFFORT_BY_SIZE[input.size] } : {}),
-      ...(config.agents.claudeModel ? { model: config.agents.claudeModel } : {}),
+      ...(model ? { model } : {}),
       logger: context.logger,
       onToolUse: async (use) => {
         await audit({
@@ -497,54 +510,4 @@ export async function commitWorkspace(context: JobContext, git: GitClient): Prom
     name: 'AI Engineering System',
     email: 'ai-engine@localhost',
   });
-}
-
-/** Kept outside the worktree so it can never be committed with the change. */
-function setupMarkerFor(taskId: string): string {
-  return path.join(loadConfig().paths.workspacesRoot, `.setup-${taskId}`);
-}
-
-/**
- * Installs the project's dependencies in the task worktree.
- *
- * A worktree is a bare checkout: it inherits nothing that was installed beside
- * the working copy, so a build or a test run in it fails on a missing toolchain
- * rather than on the change. The runtime manifest already declares how this
- * project installs, and this is the only place that runs it. A marker file
- * keeps it to once per worktree instead of once per phase.
- */
-export async function ensureDependencies(context: JobContext): Promise<void> {
-  const workspacePath = workspacePathFor(context.task.id);
-  const marker = setupMarkerFor(context.task.id);
-  try {
-    await access(marker);
-    return;
-  } catch {
-    // Not installed yet.
-  }
-
-  const manifest = await context.repos.runtimeManifests.latest(context.project.id);
-  const commands = manifest?.manifest.setup.commands ?? [];
-  if (commands.length === 0) {
-    context.logger.warn('the runtime manifest declares no setup command, so the worktree keeps whatever it has');
-    return;
-  }
-
-  const executor = createExecutor(context.task.id);
-  for (const command of commands) {
-    context.logger.info('installing dependencies in the worktree', { command });
-    const outcome = await executor.run({
-      command,
-      cwd: workspacePath,
-      timeoutMs: loadConfig().sandbox.commandTimeoutMs,
-    });
-    if (outcome.exitCode !== 0) {
-      throw new AppError('setup_failed', `Setup command failed in the task workspace: ${command}`, 500, {
-        command,
-        exitCode: outcome.exitCode,
-        output: outcome.stdout.slice(-4000) + outcome.stderr.slice(-4000),
-      });
-    }
-  }
-  await writeFile(marker, `${new Date().toISOString()}\n`, 'utf8');
 }

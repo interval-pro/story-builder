@@ -136,7 +136,7 @@ export default function ChatPage() {
       {view && view.session.permissionMode !== 'dontAsk' ? (
         <Alert tone="caution" title={`This chat can change files in ${project.name}`}>
           It is set to “{MODE_LABELS[view.session.permissionMode] ?? view.session.permissionMode}”, and it is working in
-          your actual checkout rather than in a worktree. There is no terminal for it to ask in, so it does not ask.
+          your actual checkout, on whatever branch it is on. There is no terminal for it to ask in, so it does not ask.
           Change this under Settings.
         </Alert>
       ) : null}

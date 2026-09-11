@@ -4,7 +4,8 @@ import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
 
 const COLUMNS = `id, name, repo_path, default_branch, remote_url, kind, description, setup_state,
-  setup_error, archived_at, created_at, updated_at`;
+  setup_error, work_branch, remote_access, remote_checked_at, merge_conflict_task_id, archived_at,
+  created_at, updated_at`;
 
 export class ProjectRepository {
   constructor(private readonly db: Queryable) {}
@@ -17,16 +18,17 @@ export class ProjectRepository {
     kind?: ProjectKind;
     description?: string | null;
     /**
-     * A project added from the cockpit is not usable until its runtime manifest
-     * and its first knowledge snapshot exist, so it starts PENDING and a setup
-     * job moves it on. The installation registers itself as READY, because it
-     * was prepared by the installer before this row existed.
+     * A project added from the cockpit is not usable until it has been read once,
+     * so it starts PENDING and a setup job moves it on. The installation registers
+     * itself as READY, because it was prepared before this row existed.
      */
     setupState?: Project['setupState'];
+    /** The branch stories start from. Defaults to the repository's own default. */
+    workBranch?: string;
   }): Promise<Project> {
     const row = await this.db.queryOne(
-      `INSERT INTO projects (id, name, repo_path, default_branch, remote_url, kind, description, setup_state)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING ${COLUMNS}`,
+      `INSERT INTO projects (id, name, repo_path, default_branch, remote_url, kind, description, setup_state, work_branch)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING ${COLUMNS}`,
       [
         newId(),
         input.name,
@@ -36,6 +38,7 @@ export class ProjectRepository {
         input.kind ?? 'PROJECT',
         input.description ?? null,
         input.setupState ?? 'READY',
+        input.workBranch ?? input.defaultBranch ?? 'main',
       ],
     );
     return camelize<Project>(row!);
@@ -126,16 +129,59 @@ export class ProjectRepository {
     });
   }
 
-  async update(id: string, patch: Partial<Pick<Project, 'name' | 'defaultBranch' | 'remoteUrl' | 'description'>>): Promise<Project> {
+  /**
+   * Records whether a push and a pull request are actually possible.
+   *
+   * Established when the project is added rather than discovered by a push that
+   * fails at the very end of a story, which is what happened before.
+   */
+  async setRemoteAccess(id: string, access: Project['remoteAccess']): Promise<Project> {
+    const row = await this.db.queryOne(
+      `UPDATE projects SET remote_access = $2, remote_checked_at = now(), updated_at = now()
+       WHERE id = $1 RETURNING ${COLUMNS}`,
+      [id, access],
+    );
+    if (!row) throw new NotFoundError('Project', id);
+    return camelize<Project>(row);
+  }
+
+  /**
+   * Marks the project's directory as holding an unfinished merge, or free again.
+   *
+   * This is a lock, not a label: while it is set the queue starts nothing in this
+   * project, because the conflict is sitting in the working tree waiting for
+   * someone to open it in their editor.
+   */
+  async setMergeConflict(id: string, taskId: string | null): Promise<Project> {
+    const row = await this.db.queryOne(
+      `UPDATE projects SET merge_conflict_task_id = $2, updated_at = now() WHERE id = $1 RETURNING ${COLUMNS}`,
+      [id, taskId],
+    );
+    if (!row) throw new NotFoundError('Project', id);
+    return camelize<Project>(row);
+  }
+
+  async update(
+    id: string,
+    patch: Partial<Pick<Project, 'name' | 'defaultBranch' | 'remoteUrl' | 'description' | 'workBranch'>>,
+  ): Promise<Project> {
     const row = await this.db.queryOne(
       `UPDATE projects SET
          name = COALESCE($2, name),
          default_branch = COALESCE($3, default_branch),
          remote_url = COALESCE($4, remote_url),
          description = COALESCE($5, description),
+         work_branch = COALESCE($6, work_branch),
          updated_at = now()
        WHERE id = $1 RETURNING ${COLUMNS}`,
-      [id, patch.name ?? null, patch.defaultBranch ?? null, patch.remoteUrl ?? null, patch.description ?? null],
+      [
+        id,
+        patch.name ?? null,
+        patch.defaultBranch ?? null,
+        patch.remoteUrl ?? null,
+        patch.description ?? null,
+        patch.workBranch ?? null,
+      ],
     );
     if (!row) throw new NotFoundError('Project', id);
     return camelize<Project>(row);

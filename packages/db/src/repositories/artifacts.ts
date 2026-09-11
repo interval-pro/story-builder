@@ -3,6 +3,9 @@ import type { ArtifactRecord } from '@ai-engine/domain';
 import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
 
+// The bytes are deliberately not in this list. Every query that lists artifacts
+// would otherwise carry every transcript in the task, and a listing is read far
+// more often than a body.
 const COLUMNS = `id, project_id, task_id, run_id, kind, content_type, size_bytes, storage_path,
   checksum, metadata, created_at`;
 
@@ -17,12 +20,13 @@ export class ArtifactRepository {
     kind: string;
     contentType?: string;
     sizeBytes: number;
-    storagePath: string;
     checksum: string;
+    /** The bytes themselves. An artifact is a row now, not a row and a file. */
+    content: Buffer;
     metadata?: Record<string, unknown>;
   }): Promise<ArtifactRecord> {
     const row = await this.db.queryOne(
-      `INSERT INTO artifacts (id, project_id, task_id, run_id, kind, content_type, size_bytes, storage_path, checksum, metadata)
+      `INSERT INTO artifacts (id, project_id, task_id, run_id, kind, content_type, size_bytes, checksum, content, metadata)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING ${COLUMNS}`,
       [
         input.id ?? newId(),
@@ -32,12 +36,34 @@ export class ArtifactRepository {
         input.kind,
         input.contentType ?? 'text/plain',
         input.sizeBytes,
-        input.storagePath,
         input.checksum,
+        input.content,
         JSON.stringify(input.metadata ?? {}),
       ],
     );
     return camelize<ArtifactRecord>(row!);
+  }
+
+  /**
+   * The bytes of one artifact, read only when something actually wants them.
+   *
+   * A row written before artifacts moved into the database has none, and says so
+   * rather than returning an empty buffer that would read as a file with nothing
+   * in it.
+   */
+  async readContent(id: string): Promise<Buffer> {
+    const row = await this.db.queryOne<{ content: Buffer | null; storage_path: string | null }>(
+      'SELECT content, storage_path FROM artifacts WHERE id = $1',
+      [id],
+    );
+    if (!row) throw new NotFoundError('Artifact', id);
+    if (row.content === null) {
+      throw new NotFoundError(
+        'Artifact content',
+        `${id} was written before artifacts moved into the database; its bytes were at ${row.storage_path ?? 'an unrecorded path'}`,
+      );
+    }
+    return row.content;
   }
 
   async getById(id: string): Promise<ArtifactRecord> {

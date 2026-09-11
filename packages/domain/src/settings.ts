@@ -27,6 +27,16 @@ export interface SettingDescriptor {
   max?: number;
   /** Which screen section it belongs to. */
   group: 'queue' | 'usage' | 'agents' | 'integration' | 'chat';
+  /**
+   * Where the value may be set.
+   *
+   * `global` is the whole installation and nothing else: how much runs at once is
+   * not a property of one repository. `both` may also be set per project, and the
+   * project's value wins for that project only — a repository under a different
+   * account needs its own token, and a project with a slow test suite may want
+   * fewer fix cycles than the rest.
+   */
+  scope: 'global' | 'both';
 }
 
 export const SETTING_KEYS = {
@@ -53,6 +63,7 @@ export const SETTING_DESCRIPTORS: SettingDescriptor[] = [
     min: 1,
     max: 8,
     group: 'queue',
+    scope: 'global',
   },
   {
     key: SETTING_KEYS.queuePaused,
@@ -63,6 +74,7 @@ export const SETTING_DESCRIPTORS: SettingDescriptor[] = [
     kind: 'boolean',
     defaultValue: 'false',
     group: 'queue',
+    scope: 'global',
   },
   {
     key: SETTING_KEYS.weeklyTokenBudget,
@@ -75,6 +87,7 @@ export const SETTING_DESCRIPTORS: SettingDescriptor[] = [
     defaultValue: '0',
     min: 0,
     group: 'usage',
+    scope: 'global',
   },
   {
     key: SETTING_KEYS.githubToken,
@@ -87,6 +100,7 @@ export const SETTING_DESCRIPTORS: SettingDescriptor[] = [
     defaultValue: '',
     envVar: 'GITHUB_TOKEN',
     group: 'integration',
+    scope: 'both',
   },
   {
     key: SETTING_KEYS.maxQaIterations,
@@ -100,6 +114,7 @@ export const SETTING_DESCRIPTORS: SettingDescriptor[] = [
     min: 1,
     max: 10,
     group: 'agents',
+    scope: 'both',
   },
   {
     key: SETTING_KEYS.claudeModel,
@@ -109,6 +124,7 @@ export const SETTING_DESCRIPTORS: SettingDescriptor[] = [
     defaultValue: '',
     envVar: 'CLAUDE_MODEL',
     group: 'agents',
+    scope: 'both',
   },
   {
     key: SETTING_KEYS.implementationContextCeiling,
@@ -123,6 +139,7 @@ export const SETTING_DESCRIPTORS: SettingDescriptor[] = [
     defaultValue: '400000',
     min: 50000,
     group: 'agents',
+    scope: 'global',
   },
   {
     key: SETTING_KEYS.chatPermissionMode,
@@ -162,6 +179,7 @@ export const SETTING_DESCRIPTORS: SettingDescriptor[] = [
       },
     ],
     group: 'chat',
+    scope: 'both',
   },
 ];
 

@@ -2,15 +2,19 @@
 # Stops the services. Postgres keeps running so no state is lost.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-[ -f .env.local ] && { set -a; . ./.env.local; set +a; }
+ROOT="$(pwd)"
+. "$ROOT/scripts/state-root.sh"
+STATE_ROOT="${STATE_ROOT:-$(state_root_for "${INSTALL_ROOT:-$ROOT}")}"
+[ -f "$STATE_ROOT/env" ] && { set -a; . "$STATE_ROOT/env"; set +a; }
+RUN_DIR="$STATE_ROOT/run"
 
 for name in web worker orchestrator api; do
-  if [ -f ".run/$name.pid" ]; then
-    pid="$(cat ".run/$name.pid")"
+  if [ -f "$RUN_DIR/$name.pid" ]; then
+    pid="$(cat "$RUN_DIR/$name.pid")"
     if kill -0 "$pid" 2>/dev/null; then
       kill "$pid" && echo "stopped $name"
     fi
-    rm -f ".run/$name.pid"
+    rm -f "$RUN_DIR/$name.pid"
   fi
 done
 
@@ -43,5 +47,13 @@ for port in 3000 4000 4100; do
     kill "$pid" 2>/dev/null && echo "freed port $port"
   fi
 done
+
+# The workers are gone, so nothing is running any job they had claimed. Saying
+# so now is what stops a project's directory staying locked until the lease
+# times out, which reads from the cockpit as a system that is up and idle and
+# refuses to start anything.
+if [ -f apps/cli/dist/release-jobs.js ]; then
+  node apps/cli/dist/release-jobs.js || true
+fi
 
 echo "Postgres is still running. Stop it with: docker stop \"${PG_CONTAINER:-ai-engine-postgres}\""

@@ -1,5 +1,5 @@
 import { HttpRouter, ValidationError } from '@ai-engine/shared';
-import { deriveTaskProgress, SETTING_KEYS, totalTokens, transitionsFrom } from '@ai-engine/domain';
+import { deriveTaskProgress, SETTING_KEYS, TERMINAL_STATES, totalTokens, transitionsFrom } from '@ai-engine/domain';
 import { UNBLOCK_TARGETS, type UnblockTarget } from '@ai-engine/orchestrator';
 import { assertCanApply, startApply } from '../apply';
 import { actorFrom, resolveProjectId, requireBody, type ApiContext } from '../context';
@@ -32,7 +32,6 @@ export function registerTaskRoutes(router: HttpRouter, context: ApiContext): voi
     const qaRuns = await context.repos.qaRuns.listByTask(task.id);
     const testRuns = await context.repos.testRuns.listByTask(task.id);
     const conflicts = await context.conflicts.openConflicts(task.id);
-    const sandbox = await context.repos.sandboxes.findActiveByTask(task.id);
     const activeJob = await context.queue.findActiveForTask(task.id);
     const changes = await context.repos.gitChanges.listForTask(task.id);
     const project = await context.repos.projects.getById(task.projectId);
@@ -51,7 +50,7 @@ export function registerTaskRoutes(router: HttpRouter, context: ApiContext): voi
       // The fix-cycle limit as configured, not as hardcoded: the Checks tab draws
       // the remaining cycles from it, and drawing five when the setting says three
       // is a lie about how much room is left.
-      maxQaIterations: await context.repos.settings.integer(SETTING_KEYS.maxQaIterations),
+      maxQaIterations: await context.repos.settings.forProject(task.projectId).integer(SETTING_KEYS.maxQaIterations),
       project,
       applies,
       story,
@@ -62,7 +61,6 @@ export function registerTaskRoutes(router: HttpRouter, context: ApiContext): voi
       qaRuns,
       testRuns,
       conflicts,
-      sandbox,
       activeJob,
       changes,
       allowedTransitions: transitionsFrom(task.state),
@@ -219,6 +217,51 @@ export function registerTaskRoutes(router: HttpRouter, context: ApiContext): voi
       candidateRef: task.branchName,
     });
     return { applyId: record.id, status: record.status, candidateRef: record.candidateRef };
+  });
+
+  /**
+   * Puts a finished story into the branch you actually work on.
+   *
+   * Queued rather than done here, because it needs the project's working
+   * directory to itself and the queue is what hands that out. Everything a
+   * conflict can lead to is the same endpoint with a different action, for the
+   * same reason.
+   */
+  router.post('/api/tasks/:id/merge', async ({ params, body }) => {
+    const task = await context.repos.tasks.getById(params['id']!);
+    const project = await context.repos.projects.getById(task.projectId);
+    const input = (body ?? {}) as { action?: string };
+    const action = input.action ?? 'merge';
+    if (!['merge', 'continue', 'abort', 'undo', 'resolve'].includes(action)) {
+      throw new ValidationError(`Unknown merge action "${action}"`);
+    }
+
+    if (action === 'merge') {
+      if (task.mergedAt) {
+        throw new ValidationError(`This story was already merged into ${project.workBranch}.`);
+      }
+      if (!TERMINAL_STATES.includes(task.state)) {
+        throw new ValidationError(
+          `The story is ${task.state}. Let it finish before merging it, or stop it first.`,
+        );
+      }
+    }
+    if ((action === 'continue' || action === 'abort' || action === 'resolve') && project.mergeConflictTaskId !== task.id) {
+      throw new ValidationError('This story has no conflicted merge waiting.');
+    }
+    if (action === 'undo' && !task.mergeUndoCommit) {
+      throw new ValidationError('This story has no recorded merge to undo.');
+    }
+
+    // Letting the engineer try is the one action that runs an agent, so it is
+    // the one that takes a concurrency slot as well as the directory.
+    const job = await context.queue.enqueue({
+      taskId: task.id,
+      projectId: project.id,
+      jobType: action === 'resolve' ? 'MERGE_RESOLVE' : 'MERGE_STORY',
+      payload: { taskId: task.id, action },
+    });
+    return { queued: Boolean(job), action };
   });
 
   router.post('/api/tasks/:id/pause', async ({ params, headers }) => {

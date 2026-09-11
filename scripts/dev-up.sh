@@ -6,26 +6,34 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
-ENV_FILE="${ENV_FILE:-.env.local}"
+. "$ROOT/scripts/state-root.sh"
+
+export INSTALL_ROOT="${INSTALL_ROOT:-$ROOT}"
+export STATE_ROOT="${STATE_ROOT:-$(state_root_for "$INSTALL_ROOT")}"
+RUN_DIR="$STATE_ROOT/run"
+ENV_FILE="${ENV_FILE:-$STATE_ROOT/env}"
+mkdir -p "$STATE_ROOT" "$RUN_DIR" "$STATE_ROOT/snapshots" "$STATE_ROOT/tmp"
+
+# An installation made before the state moved keeps its settings rather than
+# losing them: the old file is taken over once, and the checkout is left with
+# nothing machine-specific in it.
+if [ ! -f "$ENV_FILE" ] && [ -f "$ROOT/.env.local" ]; then
+  echo "-> Moving .env.local to $ENV_FILE"
+  mv "$ROOT/.env.local" "$ENV_FILE"
+fi
 
 if [ ! -f "$ENV_FILE" ]; then
-  echo "Missing $ENV_FILE. Run ./install.sh or copy .env.example." >&2
+  echo "Missing $ENV_FILE. Run ./install.sh." >&2
   exit 1
 fi
 
-set -a; . "./$ENV_FILE"; set +a
+set -a; . "$ENV_FILE"; set +a
 
-# Worktrees and artifacts belong to the installation, not to the repository
-# being worked on. They sit beside it rather than inside it, because installing
-# a new version replaces the installation directory while the database that
-# indexes them survives.
 export INSTALL_ROOT="${INSTALL_ROOT:-$ROOT}"
-export STATE_ROOT="${STATE_ROOT:-$INSTALL_ROOT.state}"
+export STATE_ROOT="${STATE_ROOT:-$(state_root_for "$INSTALL_ROOT")}"
 export WORKSPACES_ROOT="${WORKSPACES_ROOT:-$STATE_ROOT/workspaces}"
-export ARTIFACTS_ROOT="${ARTIFACTS_ROOT:-$STATE_ROOT/artifacts}"
 PG_CONTAINER="${PG_CONTAINER:-ai-engine-postgres}"
 PG_PORT="${PG_PORT:-5433}"
-mkdir -p "$WORKSPACES_ROOT" "$ARTIFACTS_ROOT" .run
 
 # An env file written by an older installer is missing keys this script and the
 # services now rely on, and the defaults above only live for this shell. Writing
@@ -41,8 +49,6 @@ ensure_env() {
 }
 ensure_env INSTALL_ROOT "$INSTALL_ROOT"
 ensure_env STATE_ROOT "$STATE_ROOT"
-ensure_env WORKSPACES_ROOT "$WORKSPACES_ROOT"
-ensure_env ARTIFACTS_ROOT "$ARTIFACTS_ROOT"
 ensure_env PG_CONTAINER "$PG_CONTAINER"
 ensure_env PG_PORT "$PG_PORT"
 
@@ -61,24 +67,32 @@ if ! docker ps --format '{{.Names}}' | grep -q "^${PG_CONTAINER}$"; then
 fi
 until docker exec "$PG_CONTAINER" pg_isready -U ai_engine -d ai_engine >/dev/null 2>&1; do sleep 1; done
 
+# A checkout that has never been built has no dist to start, and starting it
+# would fail four times over with a missing-module trace. Building here also
+# writes build.json, so the cockpit knows what is running.
+if [ ! -f apps/api/dist/main.js ]; then
+  echo "-> Nothing built yet"
+  "$ROOT/scripts/build.sh"
+fi
+
 echo "-> Migrations"
 node packages/db/dist/cli/migrate.js
 
 start() {
   local name="$1"; shift
-  if [ -f ".run/$name.pid" ] && kill -0 "$(cat ".run/$name.pid")" 2>/dev/null; then
+  if [ -f "$RUN_DIR/$name.pid" ] && kill -0 "$(cat "$RUN_DIR/$name.pid")" 2>/dev/null; then
     echo "-> $name already running"
     return
   fi
   echo "-> $name"
-  ( "$@" > "$ROOT/.run/$name.log" 2>&1 & echo $! > "$ROOT/.run/$name.pid" )
+  ( "$@" > "$RUN_DIR/$name.log" 2>&1 & echo $! > "$RUN_DIR/$name.pid" )
 }
 
 start api node apps/api/dist/main.js
 start orchestrator node apps/orchestrator/dist/main.js
 start worker node apps/worker/dist/main.js
 
-WEB_STAMP="$ROOT/.run/web-build.stamp"
+WEB_STAMP="$RUN_DIR/web-build.stamp"
 # 1 is the only answer that means skip. A needless build costs a minute; a
 # skipped one serves the cockpit from before the update. The lockfile and the
 # env file count as sources: dependencies hoist to the root, and API_BASE_URL
@@ -89,14 +103,14 @@ WEB_STAMP="$ROOT/.run/web-build.stamp"
 # rebuilds the cockpit every time.
 web_state=0
 bash "$ROOT/scripts/web-build-stale.sh" "$ROOT/apps/web" "$WEB_STAMP" \
-  "$ROOT/package-lock.json" "$ROOT/$ENV_FILE" >/dev/null || web_state=$?
+  "$ROOT/package-lock.json" "$ENV_FILE" >/dev/null || web_state=$?
 if [ "$web_state" -ne 1 ]; then
   # Rebuilding under a live server would swap the bundle out from under it.
   # Recorded pid first, then the port, because the Next server renames its own
   # process and dev-down.sh already learned not to trust the pid alone.
   web_pid=""
-  if [ -f .run/web.pid ] && kill -0 "$(cat .run/web.pid)" 2>/dev/null; then
-    web_pid="$(cat .run/web.pid)"
+  if [ -f "$RUN_DIR/web.pid" ] && kill -0 "$(cat "$RUN_DIR/web.pid")" 2>/dev/null; then
+    web_pid="$(cat "$RUN_DIR/web.pid")"
   fi
   port_pid="$(lsof -nP -iTCP:3000 -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
   if [ -n "$web_pid" ] || [ -n "$port_pid" ]; then
@@ -104,7 +118,7 @@ if [ "$web_state" -ne 1 ]; then
     [ -n "$web_pid" ] && kill "$web_pid" 2>/dev/null || true
     [ -n "$port_pid" ] && kill "$port_pid" 2>/dev/null || true
   fi
-  rm -f .run/web.pid
+  rm -f "$RUN_DIR/web.pid"
   # A finished build leaves a traced subset of Next under apps/web/node_modules,
   # because output: standalone traces relative to the root pinned in
   # next.config.mjs. The next build then resolves Next from that subset instead
@@ -116,8 +130,8 @@ if [ "$web_state" -ne 1 ]; then
   echo "-> Building the cockpit"
   if ! ( cd apps/web && ulimit -n 8192 \
       && NEXT_PUBLIC_API_BASE_URL="${API_BASE_URL:-http://localhost:4000}" npx next build ) \
-      > "$ROOT/.run/web-build.log" 2>&1; then
-    echo "The cockpit build failed. See .run/web-build.log." >&2
+      > "$RUN_DIR/web-build.log" 2>&1; then
+    echo "The cockpit build failed. See $RUN_DIR/web-build.log." >&2
     exit 1
   fi
   # Only now. The stamp records a build that finished, so a failure leaves the
@@ -135,7 +149,7 @@ for _ in $(seq 1 120); do
   sleep 1
 done
 if ! curl -sf "${API_BASE_URL:-http://localhost:4000}/api/health" >/dev/null 2>&1; then
-  echo "The API did not come up within two minutes. See .run/api.log." >&2
+  echo "The API did not come up within two minutes. See $RUN_DIR/api.log." >&2
   exit 1
 fi
 

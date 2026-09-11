@@ -32,10 +32,15 @@ knowledge, principles, chats, statistics — belongs to the project it came from
   blocking one holds the approval rather than being guessed.
 - Agents are stateless. Everything that matters is written down, so a crashed
   worker is replaceable mid-task.
-- Before your approval the system is read-only. After it, writes are confined to
-  the task sandbox.
-- No task ever touches your working copy. Each one gets its own Git worktree.
-- Nothing is pushed until you approve the final report.
+- Before your approval the system is read-only. After it, writes go onto the
+  story's own branch and nowhere else.
+- Nothing is ever written into a project you add. Not a marker, not a manifest,
+  not a rules directory. Everything the system learns lives in its database.
+- A story works in your project directory, on a branch of its own, one at a
+  time. When it stops, the work is committed and the directory goes back to the
+  branch you chose.
+- Nothing is pushed until you approve the final report, and nothing is merged
+  until you press merge.
 
 ## Requirements
 
@@ -71,8 +76,8 @@ Ask what you are running and whether it has drifted from upstream:
 node apps/cli/dist/main.js version
 ```
 
-By default the agents run as headless Claude Code sessions inside the task
-worktree, using the login your `claude` CLI already has. No API key is involved.
+By default the agents run as headless Claude Code sessions in the project
+directory, on the story's branch, using the login your `claude` CLI already has. No API key is involved.
 Set `AGENT_ENGINE=builtin` to use the in-process tool loop instead, which needs
 `AI_PROVIDER` and `AI_API_KEY`; with `AI_PROVIDER=mock` the whole lifecycle runs
 offline with placeholder documents.
@@ -146,7 +151,7 @@ packages/
   conflict-engine/  impact manifests, locks and base drift
   runtime-manifest/ how this project builds, tests and migrates
   security/         command policy, path policy, secrets and redaction
-  git/ github/      worktrees, diffs and pull requests
+  git/ github/      branches, diffs, merges and pull requests
 ```
 
 ## The lifecycle in practice
@@ -180,8 +185,8 @@ changed.
 High risk work, such as a database migration, needs a second explicit approval
 before any code is written.
 
-**Implementation.** Runs in an isolated sandbox on a Git worktree. The approved
-review is a contract: work the review did not cover becomes a supplemental
+**Implementation.** Runs in your project directory on the story's own branch.
+The approved review is a contract: work the review did not cover becomes a supplemental
 review for you to decide on, never a silent expansion.
 
 **Checks.** A separate agent with a fresh context reviews the diff and the test
@@ -265,8 +270,7 @@ The ones that change behaviour most:
 | `AGENT_ENGINE` | `claude-code` (default) or `builtin` |
 | `AGENT_ALLOW_SUBAGENTS` | `false` (default). Lets an agent delegate. If you turn it on, one subagent at a time is the limit; the CLI cannot enforce that |
 | `AI_PROVIDER` | Only for the builtin engine: `anthropic`, `openai` or `mock` |
-| `SANDBOX_DOCKER_ENABLED` | `false` runs tasks in host worktrees instead of containers |
 | `MAX_QA_ITERATIONS` | How many fix cycles before a story waits for you. Overridden by Settings |
 | `GITHUB_TOKEN` | Needed to push. Without it the system stops at a local branch. Overridden by Settings |
-| `WORKSPACES_ROOT` | Where task worktrees go. It must not be inside `~/.claude`, `~/.config` or `~/.ssh`: the CLI refuses to write there, and an agent whose worktree sits in one reads everything, writes nothing, and reports honestly that it implemented nothing. The system refuses such a path rather than letting you find out that way |
-| `JOB_LEASE_SECONDS` | How long a claimed job is held before it is treated as abandoned. Clamped to at least 120, because the worker renews every `max(30s, lease/3)` and a shorter lease lets a second worker start the same agent in the same worktree |
+| `STATE_ROOT` | The one directory outside the checkout that holds files: this env file, the commit that is running, the process logs, the pre-migration dumps and scratch copies of artifacts. Defaults to `~/.story-builder` |
+| `JOB_LEASE_SECONDS` | How long a claimed job is held before it is treated as abandoned. Clamped to at least 120, because the worker renews every `max(30s, lease/3)` and a shorter lease lets a second worker start the same agent in the same project directory |

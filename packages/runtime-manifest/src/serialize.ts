@@ -5,7 +5,7 @@ function yamlList(items: string[], indent: string): string {
   return items.map((item) => `${indent}- ${JSON.stringify(item)}`).join('\n');
 }
 
-/** Writes the manifest as YAML for `.ai-engineering/runtime-manifest.yaml`. */
+/** Renders the manifest as YAML, for showing it and for the apply log. */
 export function toYaml(manifest: RuntimeManifestDocument): string {
   const lines: string[] = [];
   lines.push('project:');

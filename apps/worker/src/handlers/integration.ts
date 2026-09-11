@@ -3,7 +3,8 @@ import { SETTING_KEYS } from '@ai-engine/domain';
 import { changedFiles, GitClient } from '@ai-engine/git';
 import { createRemoteProvider } from '@ai-engine/github';
 import { rebaseOntoBase } from '@ai-engine/conflict-engine';
-import { commitWorkspace, createExecutor, ensureDependencies, workspacePathFor, type JobContext } from '../job-context';
+import { createExecutor, type JobContext } from '../job-context';
+import { commitStoryWork, takeDirectory } from '../project-directory';
 
 /**
  * Runs before every pull request: rebase onto the current base, re-run the
@@ -11,11 +12,12 @@ import { commitWorkspace, createExecutor, ensureDependencies, workspacePathFor, 
  */
 export async function handleIntegrationValidation(context: JobContext): Promise<void> {
   const config = loadConfig();
-  const workspacePath = workspacePathFor(context.task.id);
+  await takeDirectory(context);
+  const workspacePath = context.project.repoPath;
   const git = new GitClient(workspacePath);
 
   // Anything the last phase left behind is committed so the rebase can move it.
-  await commitWorkspace(context, git);
+  await commitStoryWork(context, git);
 
   const rebase = await rebaseOntoBase({ workspacePath, baseBranch: context.task.baseBranch });
   if (!rebase.rebased) {
@@ -39,9 +41,8 @@ export async function handleIntegrationValidation(context: JobContext): Promise<
     });
   }
 
-  await ensureDependencies(context);
   const manifest = await context.repos.runtimeManifests.latest(context.project.id);
-  const executor = createExecutor(context.task.id);
+  const executor = createExecutor(workspacePath);
   const commands = [...(manifest?.manifest.build.commands ?? []), ...(manifest?.manifest.test.commands ?? [])];
 
   for (const command of commands) {
@@ -106,8 +107,8 @@ export async function handlePushAndPullRequest(context: JobContext): Promise<voi
     throw new AppError('not_approved', 'A pull request requires an explicit human approval', 403);
   }
 
-  const workspacePath = workspacePathFor(context.task.id);
-  const git = new GitClient(workspacePath);
+  await takeDirectory(context);
+  const git = new GitClient(context.project.repoPath);
   const headCommit = await git.headCommit();
   await context.repos.gitChanges.recordRef(context.task.id, context.task.branchName, headCommit, 'task_head');
 
@@ -160,7 +161,7 @@ export async function handlePushAndPullRequest(context: JobContext): Promise<voi
   // in the cockpit works on the next push instead of after a restart. The
   // environment variable is still the fallback, which is what keeps an existing
   // installation working unchanged.
-  const token = await context.repos.settings.text(SETTING_KEYS.githubToken);
+  const token = await context.settings.text(SETTING_KEYS.githubToken);
   const push = await git.push('origin', context.task.branchName, { token });
   if (push.exitCode !== 0) {
     const hint = token

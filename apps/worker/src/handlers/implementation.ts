@@ -11,21 +11,18 @@ import {
 import { loadAgentPrompt, runImplementationAgent } from '@ai-engine/agents';
 import { ConflictEngine } from '@ai-engine/conflict-engine';
 import { changedFiles, GitClient } from '@ai-engine/git';
+import { assertStillOurs, commitStoryWork, takeDirectory } from '../project-directory';
 import {
   buildProjectContext,
   createAgentRunner,
-  commitWorkspace,
-  ensureDependencies,
   failRun,
   recordEngineMetrics,
   recordSessionStart,
   resolveAgentVersion,
   resumableSessionFor,
   runCompletion,
-  workspacePathFor,
   type JobContext,
 } from '../job-context';
-import { SandboxClient } from '../sandbox-client';
 
 async function approvedReviewDocument(context: JobContext) {
   const versionId = await context.repos.approvals.findApprovedReviewVersionId(context.task.id);
@@ -98,16 +95,7 @@ async function shouldContinueSession(context: JobContext): Promise<{ resume: boo
  * developer's working copy.
  */
 export async function handleImplementation(context: JobContext, mode: 'IMPLEMENTATION' | 'FIX'): Promise<void> {
-  const sandbox = new SandboxClient(context.project.repoPath);
-
-  await sandbox.ensure({
-    taskId: context.task.id,
-    branch: context.task.branchName,
-    baseCommit: context.task.baseCommit,
-    mode: 'READ_WRITE',
-  });
-  await sandbox.setMode(context.task.id, 'READ_WRITE');
-  await ensureDependencies(context);
+  await takeDirectory(context);
 
   await context.orchestrator.ensureState({
     taskId: context.task.id,
@@ -215,7 +203,11 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
       );
     }
 
-    const git = new GitClient(workspacePathFor(context.task.id));
+    // Nothing has been written unless the directory is still ours. A person with
+    // the project open can switch branches at any moment.
+    await assertStillOurs(context);
+
+    const git = new GitClient(context.project.repoPath);
     const changes = await changedFiles(git, context.task.baseCommit);
     await context.repos.gitChanges.replaceForTask(
       context.task.id,
@@ -241,9 +233,9 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
     await context.repos.runs.complete(run.id, runCompletion(agentRun));
     await recordEngineMetrics(context, 'implementation', agentRun);
 
-    // The branch, not the worktree, is what survives. Without this a retry or a
-    // fix would start again from the base commit.
-    await commitWorkspace(context, git);
+    // The branch is what survives. Without this a retry or a fix would start
+    // again from the base commit.
+    await commitStoryWork(context, git);
 
     await context.orchestrator.checkpoint({
       taskId: context.task.id,

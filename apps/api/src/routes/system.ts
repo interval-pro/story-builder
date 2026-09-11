@@ -1,6 +1,5 @@
-import { homedir } from 'node:os';
-import { HttpRouter, loadConfig, RESPONSE_HANDLED, ValidationError, workspacesRootProblem } from '@ai-engine/shared';
-import { GitClient, readInstallationVersion } from '@ai-engine/git';
+import { HttpRouter, loadConfig, RESPONSE_HANDLED, statePaths, ValidationError } from '@ai-engine/shared';
+import { GitClient, readBuildStatus, readInstallationVersion } from '@ai-engine/git';
 import { fetchLatestRelease } from '@ai-engine/github';
 import { assertCanApply, startApply } from '../apply';
 import { claudeCliAvailable } from '@ai-engine/claude-code';
@@ -11,34 +10,40 @@ import { resolveProjectId, type ApiContext } from '../context';
 export function registerSystemRoutes(router: HttpRouter, context: ApiContext): void {
   router.get('/api/health', async () => {
     const config = loadConfig();
-    let sandboxManager = false;
-    try {
-      const response = await fetch(`${config.service.sandboxManagerUrl}/health`);
-      sandboxManager = response.ok;
-    } catch {
-      sandboxManager = false;
-    }
     // The engine that actually runs the agents, and whether it is usable.
     const engine = config.agents.engine;
     const cli = engine === 'claude-code' ? await claudeCliAvailable(config.agents.claudeBinary) : { available: true, version: null };
-
-    // A worktree root the agent cannot write to is the most expensive
-    // misconfiguration in this system: everything looks healthy, the agents run,
-    // and every one of them reports that it implemented nothing.
-    const workspaces = workspacesRootProblem(config.paths.workspacesRoot, homedir());
+    const database = await context.db.healthy();
 
     return {
-      status: workspaces ? 'misconfigured' : 'ok',
-      workspacesProblem: workspaces,
-      database: await context.db.healthy(),
-      sandboxManager,
+      status: database && cli.available ? 'ok' : 'degraded',
+      database,
       agentEngine: engine,
       agentEngineReady: cli.available,
       claudeCliVersion: cli.version,
       aiProvider: engine === 'claude-code' ? 'claude-code CLI login' : config.ai.provider,
-      model: engine === 'claude-code' ? config.agents.claudeModel ?? 'CLI default' : config.ai.model,
-      sandboxEnabled: config.sandbox.enabled,
+      model: engine === 'claude-code' ? (config.agents.claudeModel ?? 'CLI default') : config.ai.model,
+      installRoot: config.paths.installRoot,
+      stateRoot: config.paths.stateRoot,
     };
+  });
+
+  /**
+   * What is running against what is checked out, and what exists upstream.
+   *
+   * Two separate answers on purpose: local commits that have not been built are
+   * a thing you fix by rebuilding, and a newer release is a thing you fix by
+   * updating. One badge for both would tell you neither.
+   */
+  router.get('/api/system/build', async () => {
+    const config = loadConfig();
+    const remote = await new GitClient(config.paths.installRoot).remoteUrl().catch(() => null);
+    const latest = remote ? await fetchLatestRelease(remote).catch(() => null) : null;
+    return readBuildStatus({
+      installRoot: config.paths.installRoot,
+      buildFile: statePaths(config.paths.stateRoot).buildFile,
+      latestRelease: latest?.tag ?? null,
+    });
   });
 
   router.get('/api/system/version', async () => {
@@ -83,6 +88,38 @@ export function registerSystemRoutes(router: HttpRouter, context: ApiContext): v
       taskId: null,
       source: 'UPSTREAM',
       candidateRef: latest.tag,
+    });
+    return { applyId: record.id, status: record.status, candidateRef: record.candidateRef };
+  });
+
+  /**
+   * Rebuilds and restarts onto what is already committed here.
+   *
+   * This is the other half of the version pair: nothing is fetched and nothing
+   * is merged, because the commits are in this checkout already. What changes is
+   * only which of them is running.
+   */
+  router.post('/api/system/rebuild', async () => {
+    const installation = await context.repos.projects.findInstallation();
+    if (!installation) {
+      throw new ValidationError('This installation is not registered as a project. Run "ai-engine init" again.');
+    }
+
+    const config = loadConfig();
+    const status = await readBuildStatus({
+      installRoot: installation.repoPath,
+      buildFile: statePaths(config.paths.stateRoot).buildFile,
+    });
+    if (!status.hasUnbuiltChanges) {
+      throw new ValidationError(`Already running ${status.headCommit.slice(0, 10)}. There is nothing to rebuild.`);
+    }
+
+    await assertCanApply(context, installation);
+    const record = await startApply(context, {
+      installation,
+      taskId: null,
+      source: 'LOCAL',
+      candidateRef: status.headCommit,
     });
     return { applyId: record.id, status: record.status, candidateRef: record.candidateRef };
   });

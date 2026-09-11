@@ -29,6 +29,28 @@ export interface Project {
    */
   setupState: 'PENDING' | 'RUNNING' | 'READY' | 'FAILED';
   setupError: string | null;
+  /**
+   * The branch stories start from and merge back into. It is not necessarily the
+   * repository's default branch: the same project may be worked against main
+   * today and a release branch tomorrow.
+   */
+  workBranch: string;
+  /**
+   * Whether a push and a pull request are actually possible, established when the
+   * project is added rather than discovered by a push that fails at the very end
+   * of a story.
+   */
+  remoteAccess: 'UNKNOWN' | 'NONE' | 'READ' | 'WRITE';
+  remoteCheckedAt: string | null;
+  /**
+   * The story whose merge stopped on conflicts and is waiting for a person.
+   *
+   * While this is set the working directory holds an unfinished merge, so it is
+   * as taken as it is while a story runs and the queue starts nothing else in
+   * this project. Leaving the conflict in the tree is the point: resolving it in
+   * your own editor is the default route out.
+   */
+  mergeConflictTaskId: string | null;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -73,6 +95,20 @@ export interface Task {
   baseMoved: boolean;
   blockedReason: string | null;
   failureReason: string | null;
+  /**
+   * The branch the project directory was on when this story took it over, so it
+   * can be put back exactly as it was found.
+   */
+  returnedToBranch: string | null;
+  /**
+   * The commit the work branch was on immediately before this story was merged
+   * into it, which is what makes the merge undoable with one action rather than a
+   * search through the reflog.
+   */
+  mergeUndoCommit: string | null;
+  mergedAt: string | null;
+  /** The files git stopped on, so they can be named rather than hunted for. */
+  mergeConflictFiles: string[] | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -237,6 +273,8 @@ export interface Job {
   position: string;
   /** Whether this job occupies one of the global concurrency slots. */
   consumesSlot: boolean;
+  /** Whether it needs the project's working directory to itself. */
+  holdsDirectory: boolean;
   /** Set when a person parked this one entry without pausing the whole queue. */
   heldAt: string | null;
   payload: Record<string, unknown>;
@@ -259,8 +297,14 @@ export interface ArtifactRecord {
   kind: string;
   contentType: string;
   sizeBytes: number;
-  storagePath: string;
-  checksum: string;
+  /**
+   * Where the bytes used to live, for rows written before artifacts moved into
+   * the database. Null for everything since, and nothing reads it: it is kept so
+   * an upgraded installation can say where an old artifact was rather than
+   * pretending it never existed.
+   */
+  storagePath: string | null;
+  checksum: string | null;
   metadata: Record<string, unknown>;
   createdAt: string;
 }
@@ -456,12 +500,21 @@ export interface InstallationApply {
   id: string;
   projectId: string;
   taskId: string | null;
-  source: 'TASK' | 'UPSTREAM';
+  /**
+   * TASK is a story's branch, LOCAL is whatever is committed in the checkout
+   * already, UPSTREAM is a release fetched from the remote. The three differ only
+   * in what is merged before the build; everything after that is one path.
+   */
+  source: 'TASK' | 'UPSTREAM' | 'LOCAL';
   candidateRef: string;
   previousCommit: string;
   status: 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'ROLLED_BACK';
   step: string;
   log: string;
+  /** The commit the running build was made from: the one known-good target. */
+  builtCommit: string | null;
+  /** The dump taken before migrating, so a rollback can restore it. */
+  snapshotPath: string | null;
   startedAt: string;
   finishedAt: string | null;
 }
@@ -484,6 +537,7 @@ export interface QueueEntry {
   status: JobStatus;
   position: string;
   consumesSlot: boolean;
+  holdsDirectory: boolean;
   heldAt: string | null;
   attempt: number;
   maxAttempts: number;

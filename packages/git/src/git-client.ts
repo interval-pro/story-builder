@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process';
+import { access } from 'node:fs/promises';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import { AppError } from '@ai-engine/shared';
 
@@ -167,6 +169,67 @@ export class GitClient {
     await this.run(['branch', name, startPoint]);
   }
 
+  /**
+   * Puts the working directory on a branch, creating it if it is not there yet.
+   *
+   * Two commands rather than one because `git branch` makes a ref and leaves you
+   * where you were. Creating without checking out is how a story's writes ended
+   * up on the branch the person was sitting on while the story's own branch
+   * stayed empty, and nothing about that failure is visible until you look at
+   * the diff.
+   */
+  async switchToBranch(name: string, startPoint: string): Promise<void> {
+    if (!(await this.branchExists(name))) await this.createBranch(name, startPoint);
+    await this.checkoutBranch(name);
+  }
+
+  /**
+   * Moves the working directory onto a branch.
+   *
+   * With no worktrees this is how a story takes the project directory and how it
+   * gives it back, so a failure here is a failure to isolate rather than a
+   * convenience: it is surfaced rather than swallowed.
+   */
+  async checkoutBranch(name: string): Promise<void> {
+    await this.run(['checkout', name]);
+  }
+
+  /**
+   * Merges a branch into whatever is checked out, without fast-forwarding.
+   *
+   * A merge commit is kept deliberately: it is the record that a story ended here,
+   * and it is what makes the merge a single commit to undo.
+   */
+  async mergeBranch(
+    name: string,
+    message: string,
+    author?: { name: string; email: string },
+  ): Promise<{ merged: boolean; conflicts: string[]; output: string }> {
+    const args = ['merge', '--no-ff', '-m', message, name];
+    if (author) args.unshift('-c', `user.name=${author.name}`, '-c', `user.email=${author.email}`);
+    const result = await this.run(args, { allowFailure: true });
+    if (result.exitCode === 0) return { merged: true, conflicts: [], output: result.stdout };
+    const conflicts = await this.run(['diff', '--name-only', '--diff-filter=U'], { allowFailure: true });
+    return {
+      merged: false,
+      conflicts: conflicts.stdout.split('\n').filter((line) => line.trim().length > 0),
+      output: `${result.stdout}\n${result.stderr}`.trim(),
+    };
+  }
+
+  /** Abandons a merge that stopped on conflicts, leaving the branch as it was. */
+  async abortMerge(): Promise<void> {
+    await this.run(['merge', '--abort'], { allowFailure: true });
+  }
+
+  /** Local branches, newest commit first, which is the order a person thinks in. */
+  async listBranches(): Promise<string[]> {
+    const result = await this.run(['branch', '--format=%(refname:short)', '--sort=-committerdate'], {
+      allowFailure: true,
+    });
+    return result.stdout.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+  }
+
   async branchExists(name: string): Promise<boolean> {
     const result = await this.run(['rev-parse', '--verify', `refs/heads/${name}`], { allowFailure: true });
     return result.exitCode === 0;
@@ -205,6 +268,53 @@ export class GitClient {
 
   async abortRebase(): Promise<void> {
     await this.run(['rebase', '--abort'], { allowFailure: true });
+  }
+
+  /**
+   * Carries on a rebase whose conflicts have been resolved and staged.
+   *
+   * A person resolving in their editor leaves exactly this state, and so does an
+   * agent. `--no-edit` because the commit message is already the one being
+   * replayed and nothing here can open an editor.
+   */
+  async continueRebase(): Promise<{ success: boolean; conflicts: string[]; output: string }> {
+    const result = await this.run(['-c', 'core.editor=true', 'rebase', '--continue'], { allowFailure: true });
+    if (result.exitCode === 0) return { success: true, conflicts: [], output: result.stdout };
+    return {
+      success: false,
+      conflicts: await this.unmergedPaths(),
+      output: `${result.stdout}\n${result.stderr}`.trim(),
+    };
+  }
+
+  /** Files git still considers in conflict: the question "is it resolved yet". */
+  async unmergedPaths(): Promise<string[]> {
+    const result = await this.run(['diff', '--name-only', '--diff-filter=U'], { allowFailure: true });
+    return result.stdout.split('\n').filter((line) => line.trim().length > 0);
+  }
+
+  /** Whether a rebase or a merge is part-way through, resolved or not. */
+  async operationInProgress(): Promise<'rebase' | 'merge' | null> {
+    const rebase = await this.run(['rev-parse', '--git-path', 'rebase-merge'], { allowFailure: true });
+    const applying = await this.run(['rev-parse', '--git-path', 'rebase-apply'], { allowFailure: true });
+    const merging = await this.run(['rev-parse', '--git-path', 'MERGE_HEAD'], { allowFailure: true });
+    const exists = async (result: { exitCode: number; stdout: string }): Promise<boolean> => {
+      if (result.exitCode !== 0) return false;
+      const check = await this.run(['rev-parse', '--verify', 'HEAD'], { allowFailure: true });
+      if (check.exitCode !== 0) return false;
+      return access(path.resolve(this.cwd, result.stdout.trim()))
+        .then(() => true)
+        .catch(() => false);
+    };
+    if (await exists(rebase)) return 'rebase';
+    if (await exists(applying)) return 'rebase';
+    if (await exists(merging)) return 'merge';
+    return null;
+  }
+
+  /** Moves a branch back to a commit, discarding what came after it. */
+  async resetHard(commit: string): Promise<void> {
+    await this.run(['reset', '--hard', commit]);
   }
 
   /** Commits that exist on `ref` but not on `base`. */

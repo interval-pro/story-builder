@@ -46,6 +46,13 @@ export interface Project {
   description: string | null;
   setupState: 'PENDING' | 'RUNNING' | 'READY' | 'FAILED';
   setupError: string | null;
+  /** The branch stories start from and are merged back into. */
+  workBranch: string;
+  /** Whether a push and a pull request are possible, checked when it was added. */
+  remoteAccess: 'UNKNOWN' | 'NONE' | 'READ' | 'WRITE';
+  remoteCheckedAt: string | null;
+  /** The story whose merge stopped on conflicts and is holding the directory. */
+  mergeConflictTaskId: string | null;
   createdAt: string;
   taskCounts?: Record<string, number>;
   knowledgeSnapshot?: { sequence: number; gitCommit: string } | null;
@@ -66,6 +73,9 @@ export interface Task {
   blockedReason: string | null;
   failureReason: string | null;
   baseMoved: boolean;
+  mergeUndoCommit: string | null;
+  mergedAt: string | null;
+  mergeConflictFiles: string[] | null;
   createdAt: string;
   updatedAt: string;
   projectName?: string;
@@ -318,9 +328,14 @@ export interface SettingDescriptor {
   min?: number;
   max?: number;
   group: string;
+  /**
+   * Where the value may be set. `global` is the whole installation and nothing
+   * else; `both` may also be set per project, and the project's value wins there.
+   */
+  scope: 'global' | 'both';
   value: string;
   isSet: boolean;
-  source: 'stored' | 'environment' | 'default';
+  source: 'project' | 'stored' | 'environment' | 'default';
 }
 
 export interface ChatSession {

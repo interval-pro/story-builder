@@ -22,7 +22,8 @@ export function registerChatRoutes(router: HttpRouter, context: ApiContext): voi
   router.post('/api/chat/sessions', async ({ body }) => {
     const input = (body ?? {}) as { projectId?: string; title?: string; permissionMode?: string };
     const projectId = await resolveProjectId(context, input.projectId ?? null);
-    const permissionMode = input.permissionMode ?? (await context.repos.settings.text(SETTING_KEYS.chatPermissionMode));
+    const permissionMode =
+      input.permissionMode ?? (await context.repos.settings.forProject(projectId).text(SETTING_KEYS.chatPermissionMode));
     return {
       session: await context.repos.chat.createSession({
         projectId,

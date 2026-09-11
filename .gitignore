@@ -2,11 +2,15 @@ node_modules/
 dist/
 *.tsbuildinfo
 .next/
+coverage/
+.DS_Store
+
+# Nothing machine-specific belongs in this checkout any more. The env file, the
+# commit that is running, the process logs and the pre-migration dumps all live
+# in ~/.story-builder. These entries stay so an installation made before that
+# move does not commit what it left behind.
 .env
 .env.local
-coverage/
+.run/
 .ai-workspaces/
 .artifacts/
-.DS_Store
-.run/
-.ai-engineering/installation.json

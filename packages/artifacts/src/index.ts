@@ -1,2 +1,2 @@
 export * from './artifact-store';
-export * from './filesystem-store';
+export * from './database-store';

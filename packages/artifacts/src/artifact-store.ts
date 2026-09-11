@@ -12,19 +12,24 @@ export interface PutArtifactInput {
 }
 
 /**
- * Large execution output never goes into Postgres. Postgres keeps the metadata
- * row, the bytes live in the artifact store volume.
+ * What an agent produced: findings, transcripts, reports, diffs, test output.
+ *
+ * All of it is text measured in kilobytes and all of it lives in Postgres, so a
+ * project's history is one thing that can be read, backed up and deleted as one
+ * thing.
  */
 export interface ArtifactStore {
   put(input: PutArtifactInput): Promise<ArtifactRecord>;
   get(id: string): Promise<{ record: ArtifactRecord; content: Buffer }>;
   getText(id: string): Promise<string>;
   /**
-   * Absolute path of the stored bytes, for handing an agent something to read
-   * instead of sending it inline on every run. A remote store would have to
-   * materialise a local copy.
+   * Writes a copy somewhere an agent can be pointed at it, instead of carrying
+   * the contents inline in every prompt, and returns its path. It is a copy: the
+   * artifact itself is the row.
    */
-  localPath(record: ArtifactRecord): string;
+  materialise(record: ArtifactRecord): Promise<string>;
+  /** The directory those copies land in, for granting an agent access to it. */
+  materialisedDirectory(projectId: string): string;
   stream(id: string): Promise<Readable>;
   delete(id: string): Promise<void>;
 }

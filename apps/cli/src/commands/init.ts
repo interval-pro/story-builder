@@ -1,29 +1,18 @@
 import { execFile } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { loadConfig, writeInstallationMarker } from '@ai-engine/shared';
+import { loadConfig } from '@ai-engine/shared';
 import { createRepositories, Database, migrate } from '@ai-engine/db';
 import { GitClient, readInstallationVersion } from '@ai-engine/git';
 import { fetchLatestRelease } from '@ai-engine/github';
 import { TaskCommands } from '@ai-engine/orchestrator';
 import { KnowledgeService } from '@ai-engine/project-knowledge';
-import { detectRuntimeManifest, manifestGaps, toYaml } from '@ai-engine/runtime-manifest';
+import { detectRuntimeManifest, manifestGaps } from '@ai-engine/runtime-manifest';
 import { failure, heading, info, step, success, table, warn } from '../output';
 
 const execFileAsync = promisify(execFile);
 
 export const SYSTEM_VERSION = '0.1.0';
-
-const PROJECT_RULES_README = `# Project rules
-
-Rules placed here are read as part of the Project Brain and apply to every
-agent working on this repository. They are version controlled with the project,
-so changing them is a normal code review.
-
-A rule is a sentence about how work is done here, not a description of what the
-code currently does. The system already reads the code.
-`;
 
 async function dockerAvailable(): Promise<boolean> {
   try {
@@ -93,8 +82,7 @@ export async function initCommand(options: {
   step('Checking Docker');
   const docker = await dockerAvailable();
   if (!docker && !options.skipDocker) {
-    warn('Docker is not available. Task sandboxes will run on the host inside Git worktrees.');
-    warn('Set SANDBOX_DOCKER_ENABLED=false to make that explicit.');
+    warn('Docker is not available, and it is needed for Postgres.');
   } else if (docker) {
     success('Docker is available');
   }
@@ -125,22 +113,13 @@ export async function initCommand(options: {
       const project = await commands.ensureProject({ name: path.basename(root), repoPath: root });
       success(project.created ? 'Project registered' : 'Project already registered');
 
-      step('Writing the installation marker');
-      await writeInstallationMarker(root, {
-        installRoot: path.resolve(options.installRoot),
-        name: path.basename(options.installRoot),
-        version: version.tag,
-        installedAt: new Date().toISOString(),
-      });
-      success('The project now knows which installation serves it');
-
+      // Nothing is written into the project. Not a marker, not a manifest, not a
+      // rules directory. What the system works out about a repository belongs in
+      // its own database, where it can be changed, versioned and deleted with the
+      // project rather than left behind in someone else's tree.
       step('Inspecting the project runtime');
       const manifest = await detectRuntimeManifest(root);
       await repositories.runtimeManifests.create(project.id, manifest);
-      const projectConfigRoot = path.join(root, '.ai-engineering');
-      await mkdir(path.join(projectConfigRoot, 'project-rules'), { recursive: true });
-      await writeFile(path.join(projectConfigRoot, 'runtime-manifest.yaml'), toYaml(manifest), 'utf8');
-      await writeFile(path.join(projectConfigRoot, 'project-rules', 'README.md'), PROJECT_RULES_README, 'utf8');
       success(`Runtime manifest generated (${manifest.project.language.join(', ') || 'no language detected'})`);
       for (const gap of manifestGaps(manifest)) warn(gap);
 

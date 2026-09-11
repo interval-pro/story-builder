@@ -1,22 +1,20 @@
 import { AppError, loadConfig } from '@ai-engine/shared';
-import { carryOpenFindings, classifyTaskSize } from '@ai-engine/domain';
+import { SETTING_KEYS, carryOpenFindings, classifyTaskSize } from '@ai-engine/domain';
 import { loadAgentPrompt, runQaAgent } from '@ai-engine/agents';
 import { fullDiff, GitClient } from '@ai-engine/git';
+import { takeDirectory } from '../project-directory';
 import {
   buildProjectContext,
   createAgentRunner,
   createExecutor,
-  ensureDependencies,
   failRun,
   recordEngineMetrics,
   recordSessionStart,
   resolveAgentVersion,
   resumableSessionFor,
   runCompletion,
-  workspacePathFor,
   type JobContext,
 } from '../job-context';
-import { SandboxClient } from '../sandbox-client';
 
 /** Runs the project test suite and records the result against the task. */
 async function runProjectTests(context: JobContext, runId: string): Promise<{ command: string; exitCode: number; output: string }[]> {
@@ -26,8 +24,10 @@ async function runProjectTests(context: JobContext, runId: string): Promise<{ co
     return [{ command: '(no test command in the runtime manifest)', exitCode: 0, output: 'No test command is configured for this project.' }];
   }
 
-  await ensureDependencies(context);
-  const executor = createExecutor(context.task.id);
+  // No dependency install: this is the directory its owner works in, so whatever
+  // the tests need is already there. Installing into someone's checkout because a
+  // story is running would be a change nobody asked for.
+  const executor = createExecutor(context.project.repoPath);
   const results: { command: string; exitCode: number; output: string }[] = [];
 
   for (const command of commands) {
@@ -43,7 +43,7 @@ async function runProjectTests(context: JobContext, runId: string): Promise<{ co
 
     const outcome = await executor.run({
       command,
-      cwd: workspacePathFor(context.task.id),
+      cwd: context.project.repoPath,
       timeoutMs: loadConfig().sandbox.commandTimeoutMs,
       readOnly: true,
     });
@@ -85,8 +85,7 @@ async function runProjectTests(context: JobContext, runId: string): Promise<{ co
  */
 export async function handleQa(context: JobContext): Promise<void> {
   const config = loadConfig();
-  const sandbox = new SandboxClient(context.project.repoPath);
-  await sandbox.setMode(context.task.id, 'READ_ONLY');
+  await takeDirectory(context);
 
   await context.orchestrator.ensureState({
     taskId: context.task.id,
@@ -131,7 +130,7 @@ export async function handleQa(context: JobContext): Promise<void> {
 
   try {
     const testResults = await runProjectTests(context, run.id);
-    const git = new GitClient(workspacePathFor(context.task.id));
+    const git = new GitClient(context.project.repoPath);
     const diff = await fullDiff(git, context.task.baseCommit);
 
     // Classified once by the review and held since; a task from before that was
@@ -255,7 +254,11 @@ export async function handleQa(context: JobContext): Promise<void> {
       return;
     }
 
-    if (iteration >= config.service.maxQaIterations) {
+    // The configured limit, not the environment's: the Checks tab draws the
+    // remaining cycles from the setting, and enforcing a different number here
+    // is how it comes to say two are left when none are.
+    const maxIterations = await context.settings.integer(SETTING_KEYS.maxQaIterations);
+    if (iteration >= maxIterations) {
       await context.orchestrator.block(
         context.task.id,
         `QA still rejects this change after ${iteration} fix iterations. A human decision is required.`,

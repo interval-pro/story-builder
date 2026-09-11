@@ -39,14 +39,12 @@ services:
       DATABASE_URL: postgres://ai_engine:ai_engine@postgres:5432/ai_engine
       PROJECT_ROOT: /project
       WORKSPACES_ROOT: /ai-workspaces
-      ARTIFACTS_ROOT: /artifacts
       SANDBOX_MANAGER_URL: http://sandbox-manager:4100
       API_PORT: "4000"
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - ${PROJECT_ROOT:-.}:/project
       - workspaces:/ai-workspaces
-      - artifacts:/artifacts
     ports:
       - "4000:4000"
     depends_on:
@@ -63,12 +61,10 @@ services:
       DATABASE_URL: postgres://ai_engine:ai_engine@postgres:5432/ai_engine
       PROJECT_ROOT: /project
       WORKSPACES_ROOT: /ai-workspaces
-      ARTIFACTS_ROOT: /artifacts
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - ${PROJECT_ROOT:-.}:/project
       - workspaces:/ai-workspaces
-      - artifacts:/artifacts
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -82,7 +78,6 @@ services:
       DATABASE_URL: postgres://ai_engine:ai_engine@postgres:5432/ai_engine
       PROJECT_ROOT: /project
       WORKSPACES_ROOT: /ai-workspaces
-      ARTIFACTS_ROOT: /artifacts
       SANDBOX_MANAGER_URL: http://sandbox-manager:4100
       AI_PROVIDER: ${AI_PROVIDER:-mock}
       AI_MODEL: ${AI_MODEL:-mock-model}
@@ -93,7 +88,6 @@ services:
     volumes:
       - ${PROJECT_ROOT:-.}:/project
       - workspaces:/ai-workspaces
-      - artifacts:/artifacts
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -113,7 +107,6 @@ services:
       DATABASE_URL: postgres://ai_engine:ai_engine@postgres:5432/ai_engine
       PROJECT_ROOT: /project
       WORKSPACES_ROOT: /ai-workspaces
-      ARTIFACTS_ROOT: /artifacts
       SANDBOX_MANAGER_PORT: "4100"
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-ai-engine/sandbox:latest}
       SANDBOX_DOCKER_ENABLED: ${SANDBOX_DOCKER_ENABLED:-true}
@@ -121,7 +114,6 @@ services:
     volumes:
       - ${PROJECT_ROOT:-.}:/project
       - workspaces:/ai-workspaces
-      - artifacts:/artifacts
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "4100:4100"
@@ -146,4 +138,3 @@ services:
 volumes:
   postgres-data:
   workspaces:
-  artifacts:

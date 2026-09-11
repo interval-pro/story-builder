@@ -44,7 +44,6 @@ interface TaskDetail {
   qaRuns: { id: string; iteration: number; verdict: string; findings: never[]; notes?: never[] }[];
   testRuns: { id: string; command: string; exitCode: number; passed: boolean; createdAt: string }[];
   conflicts: { id: string; kind: string; severity: string; resource: string; description: string }[];
-  sandbox: { status: string; mode: string; workspacePath: string } | null;
   activeJob: { jobType: string; status: string; attempt: number } | null;
   changes: { filePath: string; changeType: string; insertions: number; deletions: number }[];
 }
@@ -187,6 +186,7 @@ export default function StoryPage() {
   const { task } = detail;
   const explanation = explainState(task.state);
   const latestApply = detail.applies[0] ?? null;
+  const conflicted = detail.project.mergeConflictTaskId === task.id;
   const openDecisions = (review?.decisions ?? []).filter((decision) => decision.status === 'OPEN').length;
 
   return (
@@ -319,6 +319,69 @@ export default function StoryPage() {
         <Alert tone="caution" title="Conflicts with other stories">
           {detail.conflicts.map((conflict) => `${conflict.resource}: ${conflict.description}`).join(' · ')}
         </Alert>
+      ) : null}
+
+      {detail.project.kind === 'PROJECT' && task.state === 'COMPLETED' && !task.mergedAt && !conflicted ? (
+        <Card>
+          <span className="meta">Ready to merge</span>
+          <span className="body-sm">
+            The work is on {task.branchName}. Merging rebases it onto {detail.project.workBranch} first, so the merge
+            itself is usually silent, and records where {detail.project.workBranch} was beforehand so this can be undone
+            with one action.{' '}
+            {detail.project.remoteAccess === 'WRITE'
+              ? 'It is pushed afterwards, because the token grants write access.'
+              : 'It stays local, because the token does not grant write access to the remote.'}
+          </span>
+          <div className="row">
+            <Button onClick={() => void act('merge', { action: 'merge' })} disabled={busy}>
+              Merge into {detail.project.workBranch}
+            </Button>
+          </div>
+        </Card>
+      ) : null}
+
+      {conflicted ? (
+        <Card>
+          <Alert tone="caution" title="The merge stopped on conflicts">
+            {(task.mergeConflictFiles ?? []).length > 0
+              ? `Git stopped on ${(task.mergeConflictFiles ?? []).join(', ')}.`
+              : 'Git stopped on a conflict.'}{' '}
+            The conflict is sitting in {detail.project.repoPath} exactly as git left it, so you can open it in your
+            editor. Nothing else will run in that directory until this is settled.
+          </Alert>
+          <span className="body-sm">
+            Resolving it yourself is the sensible default. A conflict is the one place where an automatic resolution is
+            at its most dangerous: both sides usually compile, and choosing wrongly produces a change that quietly does
+            half of what two people meant.
+          </span>
+          <div className="row">
+            <Button onClick={() => void act('merge', { action: 'continue' })} disabled={busy}>
+              I resolved it, carry on
+            </Button>
+            <Button variant="secondary" onClick={() => void act('merge', { action: 'resolve' })} disabled={busy}>
+              Let the engineer try
+            </Button>
+            <Button variant="ghost" onClick={() => void act('merge', { action: 'abort' })} disabled={busy}>
+              Abandon the merge
+            </Button>
+          </div>
+        </Card>
+      ) : null}
+
+      {task.mergedAt ? (
+        <Card>
+          <span className="meta">Merged {relativeAge(task.mergedAt)}</span>
+          <span className="body-sm">
+            This story is in {detail.project.workBranch}. Undoing puts that branch back to{' '}
+            {task.mergeUndoCommit?.slice(0, 10)}, which is where it was immediately before the merge. It refuses if
+            anything has been committed there since.
+          </span>
+          <div className="row">
+            <Button variant="ghost" onClick={() => void act('merge', { action: 'undo' })} disabled={busy}>
+              Undo the merge
+            </Button>
+          </div>
+        </Card>
       ) : null}
 
       {detail.project.kind === 'INSTALLATION' && task.state === 'COMPLETED' ? (

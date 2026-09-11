@@ -99,3 +99,26 @@ test('a boolean setting reads the spellings a person actually types', () => {
     assert.equal(settingAsBoolean(value, paused), false, value);
   }
 });
+
+test('what belongs to the machine is global, what belongs to a repository is not', () => {
+  const scopeOf = (key: string): string => settingDescriptor(key)!.scope;
+
+  // How much runs at once and whether anything runs at all are properties of
+  // this machine. A project cannot sensibly hold an opinion about them.
+  assert.equal(scopeOf(SETTING_KEYS.queueConcurrency), 'global');
+  assert.equal(scopeOf(SETTING_KEYS.queuePaused), 'global');
+  assert.equal(scopeOf(SETTING_KEYS.weeklyTokenBudget), 'global');
+
+  // These differ per repository for reasons that come up in practice: one lives
+  // under a different account, another has a test suite slow enough to want
+  // fewer fix cycles.
+  assert.equal(scopeOf(SETTING_KEYS.githubToken), 'both');
+  assert.equal(scopeOf(SETTING_KEYS.maxQaIterations), 'both');
+  assert.equal(scopeOf(SETTING_KEYS.claudeModel), 'both');
+});
+
+test('every setting says which scopes it may be set in', () => {
+  for (const descriptor of SETTING_DESCRIPTORS) {
+    assert.ok(['global', 'both'].includes(descriptor.scope), `${descriptor.key} scope`);
+  }
+});
