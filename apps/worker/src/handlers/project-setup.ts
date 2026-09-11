@@ -1,33 +1,25 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import path from 'node:path';
-import { writeInstallationMarker } from '@ai-engine/shared';
-import { GitClient, readInstallationVersion } from '@ai-engine/git';
+import { SETTING_KEYS } from '@ai-engine/domain';
+import { GitClient } from '@ai-engine/git';
+import { checkRemoteAccess } from '@ai-engine/github';
 import { KnowledgeService } from '@ai-engine/project-knowledge';
-import { detectRuntimeManifest, manifestGaps, toYaml } from '@ai-engine/runtime-manifest';
+import { detectRuntimeManifest, manifestGaps } from '@ai-engine/runtime-manifest';
 import type { ProjectJobContext } from '../project-context';
 
-const PROJECT_RULES_README = `# Project rules
-
-Rules placed here are read as part of the Project Brain and apply to every
-agent working on this repository. They are version controlled with the project,
-so changing them is a normal code review.
-
-A rule is a sentence about how work is done here, not a description of what the
-code currently does. The system already reads the code.
-`;
-
 /**
- * Everything a newly added project needs before a story can run against it.
+ * Everything a newly added project needs, and nothing written into it.
  *
- * Adding a project from the cockpit is one click, and what that click has to set
- * up is not instant: detecting how the project builds means reading it, and the
- * first knowledge snapshot means walking the whole tree. Doing it in the request
- * would leave the browser waiting on a repository it has never seen the size of,
- * so the project is created PENDING and this moves it to READY.
+ * Adding a project is one click, and what that click has to establish is not
+ * instant: how the project builds means reading it, and the first knowledge
+ * snapshot means walking the whole tree. So the project is created PENDING and
+ * this moves it to READY.
  *
- * It is written to be safe to run twice. A setup that failed half way through is
- * retried by the queue, and the second attempt must not produce a second
- * manifest, a second snapshot and a second marker.
+ * Nothing is written into the repository. It was gaining a marker, a manifest
+ * file and a rules directory; all three now live in the database, where they
+ * belong to this installation rather than to someone else's repository. A project
+ * that is removed leaves no trace behind, and one that is added gains none.
+ *
+ * Safe to run twice: a setup that failed half way is retried by the queue, and
+ * the second attempt must not produce a second manifest or a second snapshot.
  */
 export async function handleProjectSetup(context: ProjectJobContext): Promise<void> {
   const project = context.project;
@@ -40,49 +32,35 @@ export async function handleProjectSetup(context: ProjectJobContext): Promise<vo
     }
     if (!(await git.hasCommits())) {
       throw new Error(
-        `${project.repoPath} has no commits yet. Every task starts from a base commit, so make the first one.`,
+        `${project.repoPath} has no commits yet. Every story starts from a base commit, so make the first one.`,
       );
     }
 
-    // The branch and remote are read now rather than trusted from the request:
-    // the person picked a directory, not a branch.
+    // Read now rather than trusted from the request: the person picked a
+    // directory, not a branch.
     const defaultBranch = await git.defaultBranch();
     const remoteUrl = await git.remoteUrl();
     if (defaultBranch !== project.defaultBranch || remoteUrl !== project.remoteUrl) {
       await context.repos.projects.update(project.id, { defaultBranch, remoteUrl });
     }
 
-    const head = await git.headCommit();
+    // Whether a push is possible, established here rather than discovered by a
+    // push that fails after everything else has succeeded.
+    const token = await context.settings.text(SETTING_KEYS.githubToken);
+    const access = await checkRemoteAccess(remoteUrl, token || undefined);
+    await context.repos.projects.setRemoteAccess(project.id, access);
 
-    // How the project builds and tests. Detected once here, then read by every
-    // sandbox; a project with no manifest cannot run its own tests, which is the
-    // difference between QA checking the change and QA taking the agent's word.
-    const manifest = await detectRuntimeManifest(project.repoPath);
+    // How the project builds and tests. In the database, not in a file in the
+    // repository: it describes what this installation will run, and a project
+    // that is removed should leave nothing behind.
     const existingManifest = await context.repos.runtimeManifests.latest(project.id);
-    if (!existingManifest) {
-      await context.repos.runtimeManifests.create(project.id, manifest);
-    }
-
-    // The project gains two things and nothing else: a marker naming the
-    // installation that serves it, and a place to put its own rules.
-    const configRoot = path.join(project.repoPath, '.ai-engineering');
-    await mkdir(path.join(configRoot, 'project-rules'), { recursive: true });
-    await writeFile(path.join(configRoot, 'runtime-manifest.yaml'), toYaml(manifest), 'utf8');
-    await writeFile(path.join(configRoot, 'project-rules', 'README.md'), PROJECT_RULES_README, 'utf8');
-
-    const installGit = new GitClient(context.installRoot);
-    const version = await readInstallationVersion(context.installRoot, null).catch(() => null);
-    await writeInstallationMarker(project.repoPath, {
-      installRoot: context.installRoot,
-      name: path.basename(context.installRoot),
-      version: version?.tag ?? null,
-      installedAt: new Date().toISOString(),
-    });
-    await installGit.isRepository().catch(() => false);
+    const manifest = existingManifest?.manifest ?? (await detectRuntimeManifest(project.repoPath));
+    if (!existingManifest) await context.repos.runtimeManifests.create(project.id, manifest);
 
     const knowledge = new KnowledgeService(context.db);
     const existingSnapshot = await knowledge.latest(project.id);
     if (!existingSnapshot) {
+      const head = await git.headCommit();
       const { snapshot, extraction } = await knowledge.buildSnapshot({
         projectId: project.id,
         gitCommit: head,
@@ -106,7 +84,7 @@ export async function handleProjectSetup(context: ProjectJobContext): Promise<vo
       payload: {
         repoPath: project.repoPath,
         defaultBranch,
-        hasRemote: Boolean(remoteUrl),
+        remoteAccess: access,
         gaps: manifestGaps(manifest),
       },
     });

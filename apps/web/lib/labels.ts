@@ -58,7 +58,7 @@ const STATES: Record<string, Explanation & { tone: Tone }> = {
     label: 'Plan approved',
     tone: 'running',
     means: 'You approved the plan, so the task may now write code.',
-    next: 'Implementation starts in its own worktree, nowhere near your checkout.',
+    next: 'Implementation starts on this story\u2019s own branch in the project directory.',
   },
   HIGH_RISK_CONFIRMATION_REQUIRED: {
     label: 'High risk: confirm',
@@ -75,7 +75,7 @@ const STATES: Record<string, Explanation & { tone: Tone }> = {
   IMPLEMENTING: {
     label: 'Writing the change',
     tone: 'running',
-    means: 'An agent is writing the change in its own worktree.',
+    means: 'An agent is writing the change on this story\u2019s own branch.',
     next: 'A second agent checks the diff and runs the tests.',
   },
   QA_QUEUED: {
@@ -166,7 +166,7 @@ const STATES: Record<string, Explanation & { tone: Tone }> = {
     label: 'Stopping',
     tone: 'caution',
     means: 'A stop was requested and is being applied.',
-    next: 'The worktree is cleaned up and the story ends here.',
+    next: 'The work is committed, the directory goes back to your branch, and the story ends here.',
   },
   STOPPED: {
     label: 'Stopped',
@@ -264,7 +264,9 @@ const JOB_LABELS: Record<string, string> = {
   LEARNING: 'Learning from your corrections',
   KNOWLEDGE_REFRESH: 'Re-reading the project',
   RUNTIME_MANIFEST: 'Working out how the project builds',
-  SANDBOX_TEARDOWN: 'Cleaning up a worktree',
+  RELEASE_DIRECTORY: 'Giving the project directory back',
+  MERGE_STORY: 'Merging into the work branch',
+  MERGE_RESOLVE: 'Trying the merge conflicts',
   IDEA_INTAKE: 'Shaping an idea into stories',
   CHAT_TURN: 'Answering in chat',
   PROJECT_SETUP: 'Preparing a new project',

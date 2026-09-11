@@ -1,8 +1,9 @@
 import { createLogger, loadConfig, newId, sleep, type Logger } from '@ai-engine/shared';
-import { isProjectJob, type Job, type JobType } from '@ai-engine/domain';
+import { holdsProjectDirectory, isProjectJob, type Job, type JobType } from '@ai-engine/domain';
 import { createRepositories, Database, type Repositories } from '@ai-engine/db';
 import { JobQueue } from '@ai-engine/queue';
-import { buildJobContext } from './job-context';
+import { buildJobContext, type JobContext } from './job-context';
+import { releaseDirectory } from './project-directory';
 import { handleResearch } from './handlers/research';
 import { handleReviewGenerate, handleReviewRegenerate } from './handlers/review';
 import { handleImplementation } from './handlers/implementation';
@@ -13,12 +14,16 @@ import {
   handleKnowledgeRefresh,
   handleLearning,
   handleRuntimeManifest,
-  handleSandboxTeardown,
+  handleReleaseDirectory,
 } from './handlers/maintenance';
 import { handleProjectSetup } from './handlers/project-setup';
 import { handleIdeaIntake } from './handlers/intake';
 import { handleChatTurn } from './handlers/chat';
 import { buildProjectJobContext } from './project-context';
+import { handleMergeResolve, handleMergeStory } from './handlers/merge';
+
+/** The jobs that may deliberately leave an unfinished merge in the directory. */
+const MERGE_JOBS: readonly JobType[] = ['MERGE_STORY', 'MERGE_RESOLVE'];
 
 export interface WorkerOptions {
   db: Database;
@@ -122,6 +127,26 @@ export class Worker {
 
     const context = await buildJobContext({ db: this.db, job, workerId: this.workerId, logger: this.logger });
 
+    // The directory goes back at the end of every job, whatever the job did. A
+    // story that failed, was blocked or simply finished a phase leaves the
+    // project on the branch its owner chose, clean, with the work on its own
+    // branch. Without this the directory would stay on a story's branch for as
+    // long as that story took, including while it waits for a person.
+    try {
+      return await this.runTaskJob(job, context, taskId);
+    } finally {
+      // A merge that stopped on conflicts is the one case where the directory
+      // must stay exactly as it is: the conflict markers in the tree are what
+      // the person is going to open. Releasing would commit them.
+      if (holdsProjectDirectory(job.jobType) && !MERGE_JOBS.includes(job.jobType)) {
+        await releaseDirectory(context).catch((error: unknown) => {
+          this.logger.error('could not release the project directory', { error });
+        });
+      }
+    }
+  }
+
+  private async runTaskJob(job: Job, context: JobContext, taskId: string): Promise<void> {
     switch (job.jobType) {
       case 'RESEARCH':
         return handleResearch(context);
@@ -145,8 +170,12 @@ export class Worker {
         return handleLearning(context);
       case 'RUNTIME_MANIFEST':
         return handleRuntimeManifest(context);
-      case 'SANDBOX_TEARDOWN':
-        return handleSandboxTeardown(context, taskId);
+      case 'RELEASE_DIRECTORY':
+        return handleReleaseDirectory(context);
+      case 'MERGE_STORY':
+        return handleMergeStory(context);
+      case 'MERGE_RESOLVE':
+        return handleMergeResolve(context);
       default:
         throw new Error(`Unknown job type: ${job.jobType}`);
     }

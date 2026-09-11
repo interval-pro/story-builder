@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type SettingDescriptor } from '../../lib/api';
 import { Badge, Button, Card, Empty, ErrorText, Field } from '../../components/ui';
+import { useProjects } from '../../components/shell';
 
 const GROUPS: { key: string; title: string; standfirst: string }[] = [
   {
@@ -33,7 +34,8 @@ const GROUPS: { key: string; title: string; standfirst: string }[] = [
 ];
 
 const SOURCE_WORDS: Record<SettingDescriptor['source'], string> = {
-  stored: 'set here',
+  project: 'set for this project',
+  stored: 'from the installation',
   environment: 'from the environment',
   default: 'default',
 };
@@ -45,25 +47,37 @@ const SOURCE_WORDS: Record<SettingDescriptor['source'], string> = {
  * a new setting appears with its own explanation instead of as an unlabelled box.
  * Everything not on this page is an environment variable a restart would have to
  * follow anyway.
+ *
+ * Two scopes, kept apart on purpose. How much runs at once is a property of this
+ * machine and belongs to the installation; a token, a model or a fix-cycle limit
+ * can reasonably differ for one repository, and a project that sets one wins for
+ * itself alone. Mixing the two on one screen is how a person changes the
+ * concurrency for everything while believing they changed it for one project.
  */
 export default function SettingsPage() {
+  const { projects } = useProjects();
+  const [scope, setScope] = useState<string>('installation');
   const [settings, setSettings] = useState<SettingDescriptor[]>([]);
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const perProject = scope !== 'installation';
+  const path = perProject ? `/api/projects/${encodeURIComponent(scope)}/settings` : '/api/settings';
+
   const load = useCallback(async () => {
     try {
-      const result = await api.get<{ settings: SettingDescriptor[] }>('/api/settings');
+      const result = await api.get<{ settings: SettingDescriptor[] }>(path);
       setSettings(result.settings);
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));
     }
-  }, []);
+  }, [path]);
 
   useEffect(() => {
+    setEdits({});
     void load();
   }, [load]);
 
@@ -71,7 +85,7 @@ export default function SettingsPage() {
     if (Object.keys(edits).length === 0) return;
     setBusy(true);
     try {
-      const result = await api.put<{ settings: SettingDescriptor[] }>('/api/settings', { values: edits });
+      const result = await api.put<{ settings: SettingDescriptor[] }>(path, { values: edits });
       setSettings(result.settings);
       setEdits({});
       setSaved(true);
@@ -87,7 +101,7 @@ export default function SettingsPage() {
   async function clear(key: string) {
     setBusy(true);
     try {
-      const result = await api.delete<{ settings: SettingDescriptor[] }>(`/api/settings/${encodeURIComponent(key)}`);
+      const result = await api.delete<{ settings: SettingDescriptor[] }>(`${path}/${encodeURIComponent(key)}`);
       setSettings(result.settings);
       setEdits((current) => {
         const next = { ...current };
@@ -169,8 +183,9 @@ export default function SettingsPage() {
         <div className="grow">
           <h1 className="display">Settings</h1>
           <p className="standfirst">
-            These take effect on the next thing that reads them, without a restart. Anything not here is an environment
-            variable a restart would have to follow anyway.
+            {perProject
+              ? 'What this project alone uses. Anything left unset falls through to the installation below it.'
+              : 'What every project uses unless it says otherwise. These take effect on the next thing that reads them, without a restart.'}
           </p>
         </div>
         <div className="row">
@@ -178,6 +193,28 @@ export default function SettingsPage() {
             {dirty === 0 ? 'Nothing to save' : `Save ${dirty} change${dirty === 1 ? '' : 's'}`}
           </Button>
         </div>
+      </div>
+
+      <div className="choices">
+        <button
+          className={`choice ${scope === 'installation' ? 'selected' : ''}`}
+          onClick={() => setScope('installation')}
+        >
+          <span className="choice-label">This installation</span>
+          <span className="choice-detail">Everything, unless a project overrides it</span>
+        </button>
+        {projects
+          .filter((project) => project.kind === 'PROJECT')
+          .map((project) => (
+            <button
+              key={project.id}
+              className={`choice ${scope === project.id ? 'selected' : ''}`}
+              onClick={() => setScope(project.id)}
+            >
+              <span className="choice-label">{project.name}</span>
+              <span className="choice-detail">Only this project</span>
+            </button>
+          ))}
       </div>
 
       {error ? <ErrorText>{error}</ErrorText> : null}
@@ -199,10 +236,12 @@ export default function SettingsPage() {
                 <div className="row-between">
                   <span className="list-title">{setting.label}</span>
                   <div className="row">
-                    <Badge tone={setting.source === 'stored' ? 'done' : undefined}>{SOURCE_WORDS[setting.source]}</Badge>
-                    {setting.source === 'stored' ? (
+                    <Badge tone={setting.source === 'project' || (!perProject && setting.source === 'stored') ? 'done' : undefined}>
+                      {SOURCE_WORDS[setting.source]}
+                    </Badge>
+                    {(perProject ? setting.source === 'project' : setting.source === 'stored') ? (
                       <Button size="sm" variant="ghost" onClick={() => void clear(setting.key)} disabled={busy}>
-                        Reset
+                        {perProject ? 'Use the installation\u2019s' : 'Reset'}
                       </Button>
                     ) : null}
                   </div>

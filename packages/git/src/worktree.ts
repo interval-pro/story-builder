@@ -1,7 +1,7 @@
 import { access, realpath, rm, mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { createLogger, workspacesRootProblem } from '@ai-engine/shared';
+import { createLogger } from '@ai-engine/shared';
 import { GitClient } from './git-client';
 
 const logger = createLogger('git-worktree');
@@ -20,6 +20,38 @@ export interface WorktreeInfo {
  * Task isolation is implemented with Git worktrees. The developer's working
  * copy is never touched, and every task gets its own checkout of the base commit.
  */
+/**
+ * Whether worktrees can actually be written where they are configured to go.
+ *
+ * The Claude CLI refuses to write to paths it considers sensitive, and its own
+ * configuration directory is one of them, so a workspaces root under `~/.claude`
+ * produced an agent that read everything, wrote nothing, and reported that it
+ * had implemented nothing — four times, because a fix cycle cannot fix a
+ * permission. That cost an afternoon to diagnose from the outside and it is a
+ * property of a path, so it is checked here rather than discovered.
+ *
+ * Returns null when the path is usable, and otherwise the sentence to show.
+ */
+export function workspacesRootProblem(workspacesRoot: string, homeDir: string): string | null {
+  const resolved = path.resolve(workspacesRoot);
+  const forbidden = [
+    { dir: path.join(homeDir, '.claude'), what: "the Claude CLI's own configuration directory" },
+    { dir: path.join(homeDir, '.config'), what: 'a configuration directory' },
+    { dir: path.join(homeDir, '.ssh'), what: 'a directory holding credentials' },
+  ];
+
+  for (const entry of forbidden) {
+    if (resolved === entry.dir || resolved.startsWith(`${entry.dir}${path.sep}`)) {
+      return (
+        `Worktrees are configured under ${resolved}, which is inside ${entry.what}. ` +
+        'The agent would be refused every write there and would report that it implemented nothing. ' +
+        'Set WORKSPACES_ROOT somewhere else.'
+      );
+    }
+  }
+  return null;
+}
+
 export class WorktreeManager {
   private readonly git: GitClient;
   private readonly repositoryPath: string;

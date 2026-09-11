@@ -2,7 +2,7 @@ import { createLogger, ValidationError } from '@ai-engine/shared';
 import { createRepositories, Database, type Repositories } from '@ai-engine/db';
 import { EventLog } from '@ai-engine/events';
 import { JobQueue } from '@ai-engine/queue';
-import { FilesystemArtifactStore } from '@ai-engine/artifacts';
+import { DatabaseArtifactStore } from '@ai-engine/artifacts';
 import { ProjectBrain } from '@ai-engine/project-brain';
 import { KnowledgeService } from '@ai-engine/project-knowledge';
 import { ConflictEngine } from '@ai-engine/conflict-engine';
@@ -13,7 +13,7 @@ export interface ApiContext {
   repos: Repositories;
   events: EventLog;
   queue: JobQueue;
-  artifacts: FilesystemArtifactStore;
+  artifacts: DatabaseArtifactStore;
   brain: ProjectBrain;
   knowledge: KnowledgeService;
   conflicts: ConflictEngine;
@@ -29,7 +29,7 @@ export function createApiContext(db: Database): ApiContext {
     repos: createRepositories(db),
     events: new EventLog(db),
     queue: new JobQueue(db),
-    artifacts: new FilesystemArtifactStore(db),
+    artifacts: new DatabaseArtifactStore(db),
     brain: new ProjectBrain(db),
     knowledge: new KnowledgeService(db),
     conflicts: new ConflictEngine(db),

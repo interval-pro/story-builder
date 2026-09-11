@@ -11,6 +11,7 @@ import {
 import { classifyTaskSize } from '@ai-engine/domain';
 import { impactFromReview, ConflictEngine } from '@ai-engine/conflict-engine';
 import { KnowledgeService } from '@ai-engine/project-knowledge';
+import { takeDirectory } from '../project-directory';
 import {
   buildProjectContext,
   createAgentRunner,
@@ -20,10 +21,8 @@ import {
   resolveAgentVersion,
   resumableSessionFor,
   runCompletion,
-  taskArtifactsPathFor,
   type JobContext,
 } from '../job-context';
-import { SandboxClient } from '../sandbox-client';
 
 /**
  * Research and the first engineering review run as one job: the review is
@@ -31,14 +30,9 @@ import { SandboxClient } from '../sandbox-client';
  * checkpoint instead of two half-states.
  */
 export async function handleResearch(context: JobContext): Promise<void> {
-  const sandbox = new SandboxClient(context.project.repoPath);
-
-  await sandbox.ensure({
-    taskId: context.task.id,
-    branch: context.task.branchName,
-    baseCommit: context.task.baseCommit,
-    mode: 'READ_ONLY',
-  });
+  // The story takes the project directory and puts it on its own branch. It gives
+  // it back in the worker's finally, whatever happens in between.
+  await takeDirectory(context);
 
   await context.orchestrator.ensureState({
     taskId: context.task.id,
@@ -212,7 +206,10 @@ async function findingsArtifactPath(context: JobContext): Promise<string | null>
     context.logger.warn('no research findings artifact to point the review at, sending them inline instead');
     return null;
   }
-  return context.artifacts.localPath(record);
+  // A copy written where the agent can be granted access to it. The artifact
+  // itself is a row; this file exists for the length of the run and never lands
+  // in the project.
+  return context.artifacts.materialise(record);
 }
 
 /**
@@ -294,7 +291,11 @@ export async function generateReview(
       runId: reviewRun.id,
       phase: 'REVIEW',
       size,
-      ...(findingsPath ? { additionalDirectories: [taskArtifactsPathFor(context.project.id, context.task.id)] } : {}),
+      // The directory the copy was written into, granted explicitly. It is outside
+      // the project, so the agent reaches it only because it was named here.
+      ...(findingsPath
+        ? { additionalDirectories: [context.artifacts.materialisedDirectory(context.project.id)] }
+        : {}),
     });
 
     const { document, outcome, problems } = await runReviewAgent({

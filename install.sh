@@ -3,15 +3,14 @@
 #
 # The engine is cloned from its latest release into its own directory, outside
 # any repository it works on. Projects are added afterwards from the cockpit, one
-# click each, and a project only ever gains a marker naming the installation that
-# serves it.
+# click each, and nothing whatsoever is written into them.
 #
 #   ./install.sh
 #   ./install.sh --repo /absolute/path/to/a/repository   # adds one immediately
 #
 # Options:
 #   --repo <path>    optionally register this repository straight away
-#   --dir <path>     where to install, default ~/.story-builder/story-builder
+#   --dir <path>     where to install, default ~/story-builder
 #   --source <url>   where to install from, a URL or a local checkout
 #   --ref <tag>      install this tag or branch instead of the latest release
 #   --name <name>    name of the installation
@@ -51,7 +50,9 @@ if [ -n "$REPO" ]; then
   NAME="${NAME:-$(basename "$REPO")}"
 fi
 NAME="${NAME:-story-builder}"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.story-builder/$NAME}"
+# One level, and no directory named twice. The checkout holds code; everything
+# machine-specific lives in the state directory beside your home, not in here.
+INSTALL_DIR="${INSTALL_DIR:-$HOME/story-builder}"
 
 if [ -e "$INSTALL_DIR" ] && [ -n "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]; then
   echo "$INSTALL_DIR already exists and is not empty." >&2
@@ -103,20 +104,17 @@ if [ -d "$SOURCE_URL" ]; then
   fi
 fi
 
-echo "-> Installing dependencies"
-npm ci --silent
+. "$INSTALL_DIR/scripts/state-root.sh"
+STATE_ROOT="${STATE_ROOT:-$(state_root_for "$INSTALL_DIR")}"
+ENV_FILE="$STATE_ROOT/env"
+mkdir -p "$STATE_ROOT" "$STATE_ROOT/run" "$STATE_ROOT/snapshots" "$STATE_ROOT/tmp"
 
-echo "-> Building"
-npm run build --silent
-
-if [ ! -f .env.local ]; then
-  echo "-> Writing .env.local"
+if [ ! -f "$ENV_FILE" ]; then
+  echo "-> Writing $ENV_FILE"
   PG_PORT="${PG_PORT:-5433}"
   {
     echo "INSTALL_ROOT=$INSTALL_DIR"
-    echo "STATE_ROOT=$INSTALL_DIR.state"
-    echo "WORKSPACES_ROOT=$INSTALL_DIR.state/workspaces"
-    echo "ARTIFACTS_ROOT=$INSTALL_DIR.state/artifacts"
+    echo "STATE_ROOT=$STATE_ROOT"
     echo "DATABASE_URL=postgres://ai_engine:ai_engine@localhost:$PG_PORT/ai_engine"
     echo "PG_CONTAINER=${PG_CONTAINER:-ai-engine-postgres-$NAME}"
     echo "PG_PORT=$PG_PORT"
@@ -125,10 +123,13 @@ if [ ! -f .env.local ]; then
     echo "AI_PROVIDER=mock"
     echo "API_PORT=4000"
     echo "LOG_LEVEL=info"
-  } > .env.local
+  } > "$ENV_FILE"
 fi
 
-set -a; . ./.env.local; set +a
+set -a; . "$ENV_FILE"; set +a
+
+echo "-> Building"
+INSTALL_ROOT="$INSTALL_DIR" STATE_ROOT="$STATE_ROOT" ./scripts/build.sh --source UPSTREAM
 
 echo "-> Postgres"
 if ! docker ps --format '{{.Names}}' | grep -q "^${PG_CONTAINER}$"; then
@@ -153,7 +154,8 @@ if [ -z "$REPO" ]; then
   echo "Then open http://localhost:3000 and add the first project."
 fi
 echo
-echo "Worktrees and artifacts live in ${INSTALL_DIR}.state and the database lives in"
-echo "the ${PG_CONTAINER} container. Both survive installing a new version, so removing"
-echo "$INSTALL_DIR alone is safe."
+echo "Everything your projects accumulate lives in the ${PG_CONTAINER} container's"
+echo "database. The only files outside this checkout are in $STATE_ROOT:"
+echo "how to reach the database, which commit is running, the process logs, and the"
+echo "dumps taken before each migration. Deleting $INSTALL_DIR loses nothing."
 

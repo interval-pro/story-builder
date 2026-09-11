@@ -20,6 +20,13 @@ const SETUP_WORDS: Record<Project['setupState'], string> = {
   FAILED: 'Could not be prepared',
 };
 
+const ACCESS_WORDS: Record<Project['remoteAccess'], string> = {
+  UNKNOWN: 'not checked',
+  NONE: 'no access — stories stay on local branches',
+  READ: 'read only — nothing can be pushed',
+  WRITE: 'push and pull requests',
+};
+
 /**
  * The projects this installation serves.
  *
@@ -29,10 +36,15 @@ const SETUP_WORDS: Record<Project['setupState'], string> = {
  * project to find out how it builds and walks it once for the first knowledge
  * snapshot. That happens in the background, and a project is not usable until it
  * has finished.
+ *
+ * Nothing is written into a project you add. Not a marker, not a manifest, not a
+ * rules directory. What the system learns about it lives in the database, and
+ * the directory is used only to run stories in, on branches of their own.
  */
 export default function ProjectsPage() {
   const { reload, select } = useProjects();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [branches, setBranches] = useState<Record<string, string[]>>({});
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<Project | null>(null);
   const [busy, setBusy] = useState(false);
@@ -93,6 +105,28 @@ export default function ProjectsPage() {
     }
   }
 
+  /** Loaded when the picker is opened, not for every project on the page. */
+  async function loadBranches(project: Project) {
+    if (branches[project.id]) return;
+    const result = await api
+      .get<{ branches: string[] }>(`/api/projects/${project.id}/branches`)
+      .catch(() => ({ branches: [] as string[] }));
+    setBranches((current) => ({ ...current, [project.id]: result.branches }));
+  }
+
+  async function setWorkBranch(project: Project, workBranch: string) {
+    setBusy(true);
+    try {
+      await api.put(`/api/projects/${project.id}`, { workBranch });
+      await load();
+      await reload();
+    } catch (putError) {
+      setError(putError instanceof Error ? putError.message : String(putError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function retrySetup(project: Project) {
     setBusy(true);
     try {
@@ -130,7 +164,7 @@ export default function ProjectsPage() {
           {work.map((project) => (
             <Card key={project.id}>
               <div className="row-between">
-                <span className="meta">{project.defaultBranch}</span>
+                <span className="meta">{project.workBranch}</span>
                 <Badge tone={SETUP_TONES[project.setupState]}>{SETUP_WORDS[project.setupState]}</Badge>
               </div>
               <div className="accent-rule" />
@@ -148,7 +182,33 @@ export default function ProjectsPage() {
                 </span>
               ) : null}
 
+              {project.mergeConflictTaskId ? (
+                <Alert tone="caution" title="A merge is waiting in this directory">
+                  A story stopped on conflicts, so nothing else can run here until they are resolved or the merge is
+                  abandoned. Open the story to choose.
+                </Alert>
+              ) : null}
+
+              <Field
+                label="Work branch"
+                hint="Stories start from this branch and are merged back into it."
+              >
+                <select
+                  value={project.workBranch}
+                  disabled={busy}
+                  onFocus={() => void loadBranches(project)}
+                  onChange={(event) => void setWorkBranch(project, event.target.value)}
+                >
+                  {(branches[project.id] ?? [project.workBranch]).map((branch) => (
+                    <option key={branch} value={branch}>
+                      {branch}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
               <KeyValue label="Remote">{project.remoteUrl ?? 'none — pull requests are off'}</KeyValue>
+              <KeyValue label="Access">{ACCESS_WORDS[project.remoteAccess]}</KeyValue>
               <KeyValue label="Knowledge">
                 {project.knowledgeSnapshot
                   ? `snapshot ${project.knowledgeSnapshot.sequence} · ${project.knowledgeSnapshot.gitCommit.slice(0, 10)}`
@@ -226,8 +286,9 @@ export default function ProjectsPage() {
         }
       >
         <p className="body-sm">
-          The absolute path of a Git repository with at least one commit. Nothing in it is changed by adding it: it gains
-          a marker naming this installation and a directory for its own rules, and everything else happens in worktrees.
+          The absolute path of a Git repository with at least one commit. Nothing is written into it, now or ever:
+          everything this system learns about the project lives in its own database. Stories run in this directory, each
+          on a branch of its own, one at a time.
         </p>
         <Field label="Path">
           <input ref={pathRef} placeholder="/Users/you/work/payments-api" />
@@ -254,12 +315,12 @@ export default function ProjectsPage() {
         }
       >
         <p className="body-sm">
-          This removes every story, plan, check, snapshot, principle and chat belonging to {removing?.name}, and the
-          worktrees and artifacts on disk that go with them. It cannot be undone.
+          This removes every story, plan, check, snapshot, principle, chat and artifact belonging to {removing?.name}.
+          It cannot be undone.
         </p>
         <p className="body-sm">
-          Your repository at <span className="mono">{removing?.repoPath}</span> is not touched. It was only ever read and
-          copied into worktrees.
+          Your repository at <span className="mono">{removing?.repoPath}</span> is not touched. Nothing of ours was ever
+          written into it. The branches your stories made stay where they are, for you to keep or delete.
         </p>
       </Dialog>
     </div>

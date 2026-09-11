@@ -343,10 +343,21 @@ export class TaskCommands {
     await this.orchestrator.transition({ taskId, to: 'STOPPING', actor, reason: 'stopped by human' });
     const task = await this.orchestrator.transition({ taskId, to: 'STOPPED', actor });
     await new ConflictEngine(this.db).releaseLocks(taskId);
-    await new JobQueue(this.db).enqueue({
-      taskId: null,
-      jobType: 'SANDBOX_TEARDOWN',
-      payload: { taskId },
+
+    // Queued work for a story that is over can only fail, and while it waits it
+    // sits in front of everything else in that project's directory. A job that is
+    // already running is left alone: its worker owns it and will end it.
+    const queue = new JobQueue(this.db);
+    await queue.cancelPendingForTask(taskId);
+
+    // The story may still hold the project directory, on its own branch. This
+    // commits whatever is there and puts the directory back where its owner left
+    // it, which is the only thing a stop still owes anyone.
+    await queue.enqueue({
+      taskId,
+      projectId: task.projectId,
+      jobType: 'RELEASE_DIRECTORY',
+      payload: { taskId, projectId: task.projectId },
     });
     return task;
   }
@@ -520,6 +531,10 @@ export class TaskCommands {
       );
     }
 
+    // The branch it is on right now, not the repository's nominal default. A
+    // person who added a project while sitting on a release branch meant that
+    // branch, and they can change it afterwards.
+    const current = await git.currentBranch().catch(() => '');
     const project = await repos.projects.create({
       name: input.name?.trim() || path.basename(resolved),
       repoPath: resolved,
@@ -527,6 +542,7 @@ export class TaskCommands {
       remoteUrl: await git.remoteUrl(),
       description: input.description ?? null,
       setupState: 'PENDING',
+      ...(current && current !== 'HEAD' ? { workBranch: current } : {}),
     });
 
     await new JobQueue(this.db).enqueue({

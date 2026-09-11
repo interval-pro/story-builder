@@ -1,14 +1,14 @@
 import { loadConfig, type Logger } from '@ai-engine/shared';
 import type { ExecutionPhase, Job, Project, TaskSize } from '@ai-engine/domain';
-import { createRepositories, type Database, type Repositories } from '@ai-engine/db';
+import { createRepositories, type Database, type Repositories, type ScopedSettings } from '@ai-engine/db';
 import { EventLog } from '@ai-engine/events';
-import { FilesystemArtifactStore, type ArtifactStore } from '@ai-engine/artifacts';
+import { DatabaseArtifactStore, type ArtifactStore } from '@ai-engine/artifacts';
 import { ClaudeCodeAgentRunner } from '@ai-engine/claude-code';
 import { ProjectBrain } from '@ai-engine/project-brain';
 import { KnowledgeService } from '@ai-engine/project-knowledge';
 import { BuiltinAgentRunner, type AgentRunner, type ProjectContext } from '@ai-engine/agents';
 import { ALL_TOOLS, LocalCommandExecutor, ToolRegistry, type ToolContext } from '@ai-engine/tools';
-import { capabilitiesForPhase } from '@ai-engine/domain';
+import { SETTING_KEYS, capabilitiesForPhase } from '@ai-engine/domain';
 import { createAiProvider } from './job-context';
 
 /**
@@ -28,6 +28,8 @@ export interface ProjectJobContext {
   brain: ProjectBrain;
   knowledge: KnowledgeService;
   logger: Logger;
+  /** Settings as this project sees them: its own value first, the installation's after. */
+  settings: ScopedSettings;
   workerId: string;
   installRoot: string;
   job: Job;
@@ -49,10 +51,11 @@ export async function buildProjectJobContext(input: {
     db: input.db,
     repos,
     events: new EventLog(input.db),
-    artifacts: new FilesystemArtifactStore(input.db),
+    artifacts: new DatabaseArtifactStore(input.db),
     brain: new ProjectBrain(input.db),
     knowledge: new KnowledgeService(input.db),
     logger: input.logger.child({ projectId, jobType: input.job.jobType }),
+    settings: repos.settings.forProject(projectId),
     workerId: input.workerId,
     installRoot: loadConfig().paths.installRoot,
     job: input.job,
@@ -87,10 +90,10 @@ const EFFORT_BY_SIZE: Record<TaskSize, 'low' | 'medium' | 'high'> = {
 /**
  * An agent runner pointed at the project repository itself.
  *
- * The task runner works in a worktree that only exists because a task created
- * it. These phases have no task, so they run where the repository is. That is
- * also why the read-only phases matter more here than anywhere else: this is the
- * owner's actual checkout, not a copy of it.
+ * A task's runner works on a branch of the same checkout. These phases have no
+ * task and no branch of their own, so they run on whatever the project is
+ * currently on, and that is why their read-only permission mode matters more
+ * here than anywhere else: this is the owner's own working directory.
  */
 export async function createProjectAgentRunner(input: {
   context: ProjectJobContext;
@@ -103,7 +106,7 @@ export async function createProjectAgentRunner(input: {
   const { context, phase } = input;
 
   if (config.agents.engine === 'claude-code') {
-    const model = await context.repos.settings.text('agents.model');
+    const model = (await context.settings.raw(SETTING_KEYS.claudeModel)) ?? config.agents.claudeModel;
     return new ClaudeCodeAgentRunner({
       workspacePath: context.project.repoPath,
       timeoutMs: config.agents.claudeTimeoutMs,

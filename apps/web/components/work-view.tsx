@@ -18,7 +18,7 @@ interface Props {
   taskId: string;
   detail: {
     task: { state: string; qaIteration: number; baseMoved: boolean; branchName: string; baseCommit: string };
-    sandbox: { status: string; mode: string; workspacePath: string } | null;
+    project: { repoPath: string; workBranch: string };
     activeJob: { jobType: string; status: string; attempt: number } | null;
     changes: { filePath: string; changeType: string; insertions: number; deletions: number }[];
     testRuns: { id: string; command: string; exitCode: number; passed: boolean; createdAt: string }[];
@@ -153,8 +153,8 @@ export function WorkView({ taskId, detail, onAction }: Props) {
             <span className="meta">Where the work happens</span>
             <KeyValue label="Branch">{detail.task.branchName}</KeyValue>
             <KeyValue label="Base">{detail.task.baseCommit.slice(0, 10)}</KeyValue>
-            <KeyValue label="Worktree">{detail.sandbox?.workspacePath ?? 'not created'}</KeyValue>
-            <KeyValue label="Mode">{detail.sandbox ? detail.sandbox.mode.toLowerCase().replace('_', ' ') : '—'}</KeyValue>
+            <KeyValue label="Directory">{detail.project.repoPath}</KeyValue>
+            <KeyValue label="Goes back to">{detail.project.workBranch}</KeyValue>
             <KeyValue label="Fix cycles">{detail.task.qaIteration}</KeyValue>
             {detail.task.baseMoved ? (
               <span className="body-sm" style={{ color: 'var(--ochre-500)' }}>

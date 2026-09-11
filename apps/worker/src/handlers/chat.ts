@@ -1,5 +1,6 @@
 import { loadConfig, newId } from '@ai-engine/shared';
 import { policyForPhase, runClaudeCli, type ClaudeStreamEvent } from '@ai-engine/claude-code';
+import { JobQueue } from '@ai-engine/queue';
 import type { ProjectJobContext } from '../project-context';
 import { failRunSpend, runCompletion } from '../job-context';
 
@@ -43,6 +44,13 @@ export async function handleChatTurn(context: ProjectJobContext): Promise<void> 
   const session = await context.repos.chat.getSession(sessionId);
   const config = loadConfig();
 
+  // A story holding the project directory has it on its own branch, mid-change.
+  // The chat still answers, because making a person wait for a fix cycle before
+  // they can ask a question defeats the window, but it answers read-only: writing
+  // into someone else's branch is how work is lost quietly.
+  const busy = await new JobQueue(context.db).directoryBusy(context.project.id);
+  const permissionMode = busy ? 'dontAsk' : session.permissionMode;
+
   if (config.agents.engine !== 'claude-code') {
     await context.repos.chat.updateMessage(messageId, {
       status: 'FAILED',
@@ -68,6 +76,14 @@ export async function handleChatTurn(context: ProjectJobContext): Promise<void> 
   await context.repos.chat.updateMessage(messageId, { status: 'STREAMING', runId: run.id });
 
   const parts: { kind: 'text' | 'tool'; value: string }[] = [];
+  if (busy) {
+    parts.push({
+      kind: 'text',
+      value:
+        'A story is working in this project right now, so I am answering read-only: I can read and search, but ' +
+        'I will not change anything until it has finished.\n\n',
+    });
+  }
   const toolCalls: { name: string; input: Record<string, unknown> }[] = [];
   let lastFlush = 0;
   const flush = async (force = false): Promise<void> => {
@@ -87,7 +103,7 @@ export async function handleChatTurn(context: ProjectJobContext): Promise<void> 
       ...(resuming ? { resumeSessionId: engineSessionId } : { sessionId: engineSessionId }),
       ...policyForPhase('CHAT', {
         allowSubagents: config.agents.allowSubagents,
-        chatPermissionMode: session.permissionMode as 'auto',
+        chatPermissionMode: permissionMode as 'auto',
       }),
       onEvent: async (event: ClaudeStreamEvent) => {
         for (const block of event.message?.content ?? []) {

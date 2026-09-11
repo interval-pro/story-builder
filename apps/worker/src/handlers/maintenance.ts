@@ -4,8 +4,6 @@ import { KnowledgeService } from '@ai-engine/project-knowledge';
 import { detectRuntimeManifest, manifestGaps, toYaml, validateRuntimeManifest } from '@ai-engine/runtime-manifest';
 import { ConflictEngine } from '@ai-engine/conflict-engine';
 import { GitClient } from '@ai-engine/git';
-import { writeFile, mkdir } from 'node:fs/promises';
-import path from 'node:path';
 import {
   buildProjectContext,
   createAgentRunner,
@@ -17,7 +15,7 @@ import {
   type JobContext,
 } from '../job-context';
 import type { ProjectJobContext } from '../project-context';
-import { SandboxClient } from '../sandbox-client';
+import { releaseDirectory } from '../project-directory';
 
 const logger = createLogger('maintenance');
 
@@ -143,15 +141,7 @@ export async function handleRuntimeManifest(context: JobContext): Promise<void> 
   const record = await context.repos.runtimeManifests.create(context.project.id, detected);
   const gaps = manifestGaps(detected);
 
-  const sandbox = new SandboxClient(context.project.repoPath);
-  await sandbox.ensure({
-    taskId: context.task.id,
-    branch: `ai/runtime-manifest-${context.task.id.slice(0, 8)}`,
-    baseCommit: context.task.baseCommit,
-    mode: 'READ_WRITE',
-  });
-
-  const executor = createExecutor(context.task.id);
+  const executor = createExecutor(context.project.repoPath);
   const validation = await validateRuntimeManifest(
     detected,
     { run: (input) => executor.run({ command: input.command, timeoutMs: input.timeoutMs }) },
@@ -167,12 +157,6 @@ export async function handleRuntimeManifest(context: JobContext): Promise<void> 
     content: toYaml(detected),
   });
 
-  const manifestPath = path.join(context.project.repoPath, '.ai-engineering', 'runtime-manifest.yaml');
-  await mkdir(path.dirname(manifestPath), { recursive: true }).catch(() => undefined);
-  await writeFile(manifestPath, toYaml(detected), 'utf8').catch((error) =>
-    logger.warn('could not write the runtime manifest into the repository', { error }),
-  );
-
   await context.events.append({
     projectId: context.project.id,
     taskId: context.task.id,
@@ -183,15 +167,22 @@ export async function handleRuntimeManifest(context: JobContext): Promise<void> 
   });
 }
 
-export async function handleSandboxTeardown(context: JobContext, taskId: string): Promise<void> {
-  const sandbox = new SandboxClient(context.project.repoPath);
-  await sandbox.destroy(taskId);
+/**
+ * Gives the project directory back after a story ends.
+ *
+ * A story that is stopped while nothing of it is running still holds the
+ * directory: it is on its branch. This commits whatever is there and returns the
+ * directory to the work branch, so the next story finds it clean and the person
+ * finds it where they left it.
+ */
+export async function handleReleaseDirectory(context: JobContext): Promise<void> {
+  const { committed } = await releaseDirectory(context);
   await context.events.append({
     projectId: context.project.id,
-    taskId,
-    eventType: 'SandboxDestroyed',
+    taskId: context.task.id,
+    eventType: 'CheckpointCreated',
     actorType: 'worker',
     actorId: context.workerId,
-    payload: {},
+    payload: { releasedTo: context.task.returnedToBranch ?? context.project.workBranch, committed },
   });
 }

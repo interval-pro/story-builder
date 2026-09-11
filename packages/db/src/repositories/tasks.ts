@@ -5,7 +5,8 @@ import { camelize, camelizeAll } from '../mapping';
 
 const COLUMNS = `id, project_id, story_id, story_revision_id, state, previous_state, branch_name,
   base_branch, base_commit, knowledge_snapshot_id, risk_level, size, qa_iteration, base_moved,
-  blocked_reason, failure_reason, created_at, updated_at`;
+  blocked_reason, failure_reason, returned_to_branch, merge_undo_commit, merged_at, merge_conflict_files,
+  created_at, updated_at`;
 
 export class TaskRepository {
   constructor(private readonly db: Queryable) {}
@@ -206,6 +207,8 @@ export class TaskRepository {
         | 'baseCommit'
         | 'knowledgeSnapshotId'
         | 'storyRevisionId'
+        | 'returnedToBranch'
+        | 'mergeUndoCommit'
       >
     >,
   ): Promise<Task> {
@@ -224,6 +227,8 @@ export class TaskRepository {
          knowledge_snapshot_id = COALESCE($8, knowledge_snapshot_id),
          story_revision_id = COALESCE($9, story_revision_id),
          size = COALESCE($10, size),
+         returned_to_branch = COALESCE($11, returned_to_branch),
+         merge_undo_commit = COALESCE($12, merge_undo_commit),
          updated_at = now()
        WHERE id = $1 RETURNING ${COLUMNS}`,
       [
@@ -237,10 +242,35 @@ export class TaskRepository {
         patch.knowledgeSnapshotId ?? null,
         patch.storyRevisionId ?? null,
         patch.size ?? null,
+        patch.returnedToBranch ?? null,
+        patch.mergeUndoCommit ?? null,
       ],
     );
     if (!row) throw new NotFoundError('Task', id);
     return camelize<Task>(row);
+  }
+
+  /** What git stopped on, or nothing once the conflict is resolved. */
+  async recordMergeConflicts(id: string, files: string[]): Promise<void> {
+    await this.db.query('UPDATE tasks SET merge_conflict_files = $2, updated_at = now() WHERE id = $1', [
+      id,
+      files.length > 0 ? files : null,
+    ]);
+  }
+
+  /** Records that this story's branch was merged into the project's work branch. */
+  async markMerged(id: string, undoCommit: string): Promise<void> {
+    await this.db.query(
+      'UPDATE tasks SET merge_undo_commit = $2, merged_at = now(), updated_at = now() WHERE id = $1',
+      [id, undoCommit],
+    );
+  }
+
+  async clearMerge(id: string): Promise<void> {
+    await this.db.query(
+      'UPDATE tasks SET merge_undo_commit = NULL, merged_at = NULL, updated_at = now() WHERE id = $1',
+      [id],
+    );
   }
 
   async incrementQaIteration(id: string): Promise<number> {

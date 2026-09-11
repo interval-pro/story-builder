@@ -2,7 +2,8 @@ import { renderFinalReport, suggestCommits, validateImplementationOutcome, type 
 import { AppError } from '@ai-engine/shared';
 import { carryOpenFindings } from '@ai-engine/domain';
 import { changedFiles, fullDiff, GitClient } from '@ai-engine/git';
-import { workspacePathFor, type JobContext } from '../job-context';
+import { takeDirectory } from '../project-directory';
+import type { JobContext } from '../job-context';
 
 async function loadOutcome(context: JobContext): Promise<ImplementationOutcome> {
   const artifact = await context.repos.artifacts.latestByKind(context.task.id, 'implementation_outcome');
@@ -21,7 +22,9 @@ export async function handleFinalReport(context: JobContext): Promise<void> {
   if (!approvedVersionId) throw new AppError('not_approved', 'The final report needs an approved review', 409);
   const approved = await context.repos.reviews.getVersion(approvedVersionId);
 
-  const git = new GitClient(workspacePathFor(context.task.id));
+  // The report reads the diff, so it needs the story's branch checked out.
+  await takeDirectory(context);
+  const git = new GitClient(context.project.repoPath);
   const changes = await changedFiles(git, context.task.baseCommit);
   const diff = await fullDiff(git, context.task.baseCommit);
   const outcome = await loadOutcome(context);

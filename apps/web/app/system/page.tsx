@@ -7,14 +7,32 @@ import { formatTokens, formatTokensExact, relativeAge } from '../../lib/format';
 
 interface Health {
   status: string;
-  workspacesProblem?: string | null;
   database: boolean;
-  sandboxManager: boolean;
   agentEngine: string;
   agentEngineReady: boolean;
   claudeCliVersion: string | null;
   model: string;
-  sandboxEnabled: boolean;
+  installRoot: string;
+  stateRoot: string;
+}
+
+/**
+ * What is running against what is checked out, and what exists upstream.
+ *
+ * Two separate facts, because they have two different answers. Local commits
+ * that are not running are fixed by rebuilding; a newer release is fixed by
+ * updating. A single "out of date" badge would tell you neither.
+ */
+interface BuildStatus {
+  builtCommit: string | null;
+  builtAt: string | null;
+  headCommit: string;
+  commitsAhead: number;
+  hasUnbuiltChanges: boolean;
+  dirty: boolean;
+  latestRelease: string | null;
+  releaseIsNewer: boolean;
+  currentTag: string | null;
 }
 
 interface Version {
@@ -34,7 +52,7 @@ interface ApplyRecord {
   step: string;
   log: string;
   candidateRef: string;
-  source: 'TASK' | 'UPSTREAM';
+  source: 'TASK' | 'UPSTREAM' | 'LOCAL';
   finishedAt: string | null;
 }
 
@@ -63,6 +81,7 @@ export default function SystemPage() {
   const syncingRef = useRef(false);
   const [health, setHealth] = useState<Health | null>(null);
   const [version, setVersion] = useState<Version | null>(null);
+  const [build, setBuild] = useState<BuildStatus | null>(null);
   const [apply, setApply] = useState<ApplyRecord | null>(null);
   const [usage, setUsage] = useState<UsageView | null>(null);
   const [jobs, setJobs] = useState<Record<string, number>>({});
@@ -73,15 +92,17 @@ export default function SystemPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [healthResult, versionResult, applyResult, usageResult, jobResult] = await Promise.all([
+        const [healthResult, versionResult, buildResult, applyResult, usageResult, jobResult] = await Promise.all([
           api.get<Health>('/api/health'),
           api.get<Version>('/api/system/version').catch(() => null),
+          api.get<BuildStatus>('/api/system/build').catch(() => null),
           api.get<{ apply: ApplyRecord | null }>('/api/system/apply').catch(() => ({ apply: null })),
           api.get<UsageView>('/api/usage?windowHours=168').catch(() => null),
           api.get<{ stats: Record<string, number> }>('/api/jobs').catch(() => ({ stats: {} })),
         ]);
         setHealth(healthResult);
         setVersion(versionResult);
+        setBuild(buildResult);
         setApply(applyResult.apply);
         setUsage(usageResult);
         setJobs(jobResult.stats);
@@ -122,6 +143,24 @@ export default function SystemPage() {
     }
   }
 
+  async function rebuild() {
+    const confirmed = window.confirm(
+      'Rebuilding runs the commits already in this checkout.\n\nThe new version is built first, while the ' +
+        'current one keeps serving, so a build that fails costs nothing. Only once it succeeds is the database ' +
+        'snapshotted, the services stopped, the migrations run and everything started again.\n\nIf anything ' +
+        'fails after that, the version that was running is restored.\n\nRebuild now?',
+    );
+    if (!confirmed) return;
+    setSyncing(true);
+    setUnreachable(false);
+    try {
+      await api.post('/api/system/rebuild');
+    } catch (rebuildError) {
+      setSyncing(false);
+      setError(rebuildError instanceof Error ? rebuildError.message : String(rebuildError));
+    }
+  }
+
   if (error) return <div className="page"><ErrorText>{error}</ErrorText></div>;
   if (!health) return <div className="page">Reading the system.</div>;
 
@@ -149,9 +188,13 @@ export default function SystemPage() {
         <Tile value={week ? formatTokens(week.usedTokens) : '—'} label="Tokens this week" />
       </div>
 
-      {health.workspacesProblem ? (
-        <Alert tone="critical" title="Worktrees are in a place the agents cannot write to">
-          {health.workspacesProblem}
+      {build && build.hasUnbuiltChanges && !applying ? (
+        <Alert tone="caution" title="There are changes here that are not running">
+          {build.builtCommit
+            ? `The running version was built from ${build.builtCommit.slice(0, 10)}. The checkout is ${
+                build.commitsAhead > 0 ? `${build.commitsAhead} commit(s) ahead` : 'on a different commit'
+              }${build.dirty ? ', with uncommitted changes that no build would pick up' : ''}.`
+            : 'Nothing records which commit the running version was built from, so it is treated as unbuilt.'}
         </Alert>
       ) : null}
 
@@ -192,12 +235,21 @@ export default function SystemPage() {
                 </span>
                 <Bar percent={60} tone="caution" />
               </>
-            ) : version?.state === 'behind' ? (
+            ) : (
               <div className="row">
-                <Button onClick={() => void sync()}>Update to {version.latestRelease}</Button>
-                <span className="meta">Stops everything, rebuilds, then starts again</span>
+                {build?.hasUnbuiltChanges && !build.dirty ? (
+                  <Button onClick={() => void rebuild()}>Rebuild onto {build.headCommit.slice(0, 10)}</Button>
+                ) : null}
+                {version?.state === 'behind' || build?.releaseIsNewer ? (
+                  <Button variant="secondary" onClick={() => void sync()}>
+                    Update to {version?.latestRelease ?? build?.latestRelease}
+                  </Button>
+                ) : null}
+                {build?.dirty ? (
+                  <span className="meta">Commit or discard the uncommitted changes before rebuilding</span>
+                ) : null}
               </div>
-            ) : null}
+            )}
 
             {!applying && apply && apply.status !== 'SUCCEEDED' ? (
               <ErrorText>
@@ -276,11 +328,14 @@ export default function SystemPage() {
           <Card>
             <span className="meta">Services</span>
             <KeyValue label="Database">{health.database ? 'up' : 'down'}</KeyValue>
-            <KeyValue label="Sandbox manager">{health.sandboxManager ? 'up' : 'not running'}</KeyValue>
-            <KeyValue label="Sandboxing">{health.sandboxEnabled ? 'docker' : 'host worktrees'}</KeyValue>
             <KeyValue label="Engine">{health.agentEngine}</KeyValue>
             <KeyValue label="CLI">{health.claudeCliVersion ?? 'unknown'}</KeyValue>
             <KeyValue label="Model">{health.model}</KeyValue>
+            <KeyValue label="Running">
+              {build?.builtCommit ? `${build.builtCommit.slice(0, 10)}, built ${relativeAge(build.builtAt)}` : 'unknown'}
+            </KeyValue>
+            <KeyValue label="Checked out">{build?.headCommit.slice(0, 10) ?? '—'}</KeyValue>
+            <KeyValue label="State">{health.stateRoot}</KeyValue>
           </Card>
 
           <Card>

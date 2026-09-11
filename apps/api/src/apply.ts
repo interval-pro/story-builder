@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { loadConfig, ValidationError } from '@ai-engine/shared';
+import { loadConfig, statePaths, ValidationError } from '@ai-engine/shared';
 import type { InstallationApply, Project } from '@ai-engine/domain';
-import { GitClient } from '@ai-engine/git';
+import { GitClient, readBuildRecord } from '@ai-engine/git';
 import type { ApiContext } from './context';
 
 /**
@@ -43,15 +43,25 @@ export async function assertCanApply(context: ApiContext, installation: Project)
 
 export async function startApply(
   context: ApiContext,
-  input: { installation: Project; taskId: string | null; source: 'TASK' | 'UPSTREAM'; candidateRef: string },
+  input: {
+    installation: Project;
+    taskId: string | null;
+    source: 'TASK' | 'UPSTREAM' | 'LOCAL';
+    candidateRef: string;
+  },
 ): Promise<InstallationApply> {
   const git = new GitClient(input.installation.repoPath);
+  const config = loadConfig();
+  // What is actually running, which is the only commit known to build and serve.
+  // Recorded now because the rebuild is about to move the checkout off it.
+  const built = await readBuildRecord(statePaths(config.paths.stateRoot).buildFile);
   const record = await context.repos.installationApplies.start({
     projectId: input.installation.id,
     taskId: input.taskId,
     source: input.source,
     candidateRef: input.candidateRef,
     previousCommit: await git.headCommit(),
+    builtCommit: built?.commit ?? null,
   });
 
   await context.events.append({
@@ -64,7 +74,7 @@ export async function startApply(
   });
 
   // Detached and unreferenced, so it outlives this process being stopped.
-  const installRoot = loadConfig().paths.installRoot;
+  const installRoot = config.paths.installRoot;
   const child = spawn(process.execPath, [path.join(installRoot, 'apps', 'cli', 'dist', 'apply.js'), record.id], {
     cwd: installRoot,
     detached: true,

@@ -18,16 +18,24 @@ export interface AiProviderConfig {
 }
 
 export interface PathsConfig {
-  /** Absolute path of the installation: the engine and its prompts. */
+  /** Absolute path of the installation: the code, and nothing machine-specific. */
   installRoot: string;
-  /** Where worktrees and artifacts live, so they survive a new installation. */
+  /**
+   * The one directory outside the checkout that holds state: how to reach the
+   * database, which commit is running, the process ids, the pre-migration dumps
+   * and scratch copies of artifacts. See `statePaths`.
+   */
   stateRoot: string;
   /** Absolute path of the repository this installation works on. */
   projectRoot: string;
-  /** Root directory that holds one Git worktree per task. */
+  /**
+   * Where the unused Docker sandbox would put worktrees.
+   *
+   * Nothing in the task path reads this any more: a story works in the project
+   * directory on a branch of its own. It stays only because the sandbox manager
+   * is still in the tree, unstarted.
+   */
   workspacesRoot: string;
-  /** Root directory of the artifact store volume. */
-  artifactsRoot: string;
 }
 
 export interface ServiceConfig {
@@ -153,11 +161,7 @@ export function loadConfig(reload = false): SystemConfig {
       installRoot,
       stateRoot,
       projectRoot: str('PROJECT_ROOT', process.cwd()),
-      // Beside the installation, not inside it: installing a new version
-      // replaces that directory, and the database indexing this would then
-      // point at files that no longer exist.
       workspacesRoot: str('WORKSPACES_ROOT', path.join(stateRoot, 'workspaces')),
-      artifactsRoot: str('ARTIFACTS_ROOT', path.join(stateRoot, 'artifacts')),
     },
     service: {
       env: (str('NODE_ENV', 'development') as ServiceConfig['env']),

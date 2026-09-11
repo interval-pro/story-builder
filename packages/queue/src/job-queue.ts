@@ -1,5 +1,5 @@
 import { backoffMs, newId, NotFoundError } from '@ai-engine/shared';
-import { consumesAgentSlot, type Job, type JobType, type QueueEntry } from '@ai-engine/domain';
+import { consumesAgentSlot, holdsProjectDirectory, type Job, type JobType, type QueueEntry } from '@ai-engine/domain';
 import { camelize, camelizeAll, type Queryable } from '@ai-engine/db';
 
 const COLUMNS = `id, task_id, project_id, job_type, payload, status, attempt, max_attempts, available_at,
@@ -67,8 +67,8 @@ export class JobQueue {
    */
   async enqueue(input: EnqueueInput): Promise<Job | null> {
     const rows = await this.db.query(
-      `INSERT INTO jobs (id, task_id, project_id, job_type, payload, available_at, max_attempts, consumes_slot)
-       VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()), COALESCE($7, 3), $8)
+      `INSERT INTO jobs (id, task_id, project_id, job_type, payload, available_at, max_attempts, consumes_slot, holds_directory)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()), COALESCE($7, 3), $8, $9)
        ON CONFLICT DO NOTHING
        RETURNING ${COLUMNS}`,
       [
@@ -80,6 +80,7 @@ export class JobQueue {
         input.availableAt ?? null,
         input.maxAttempts ?? null,
         consumesAgentSlot(input.jobType),
+        holdsProjectDirectory(input.jobType),
       ],
     );
     const row = rows[0];
@@ -120,13 +121,39 @@ export class JobQueue {
            locked_by = $1,
            locked_at = now()
          WHERE id = (
-           SELECT id FROM jobs
-           WHERE status = 'PENDING'
-             AND available_at <= now()
-             AND held_at IS NULL
-             AND (NOT consumes_slot OR $2)
+           SELECT candidate.id FROM jobs candidate
+           WHERE candidate.status = 'PENDING'
+             AND candidate.available_at <= now()
+             AND candidate.held_at IS NULL
+             AND (NOT candidate.consumes_slot OR $2)
+             -- One story at a time per project. Without worktrees a project has
+             -- one working directory, so a second job for it would be a second
+             -- agent writing to the same checkout.
+             AND (
+               NOT candidate.holds_directory
+               OR (
+                 NOT EXISTS (
+                   SELECT 1 FROM jobs running
+                   WHERE running.status = 'RUNNING'
+                     AND running.holds_directory
+                     AND running.project_id = candidate.project_id
+                 )
+                 -- A merge that stopped on conflicts holds the directory just as
+                 -- firmly: the conflict is sitting in the tree waiting for
+                 -- someone to open it. Only the jobs that exist to end that
+                 -- conflict may run into it.
+                 AND (
+                   candidate.job_type IN ('MERGE_RESOLVE', 'MERGE_STORY')
+                   OR NOT EXISTS (
+                     SELECT 1 FROM projects conflicted
+                     WHERE conflicted.id = candidate.project_id
+                       AND conflicted.merge_conflict_task_id IS NOT NULL
+                   )
+                 )
+               )
+             )
              ${typeFilter}
-           ORDER BY position ASC, created_at ASC
+           ORDER BY candidate.position ASC, candidate.created_at ASC
            FOR UPDATE SKIP LOCKED
            LIMIT 1
          )
@@ -279,7 +306,7 @@ export class JobQueue {
    */
   async overview(limit = 200): Promise<QueueEntry[]> {
     const rows = await this.db.query(
-      `SELECT j.id, j.job_type, j.status, j.position::text AS position, j.consumes_slot, j.held_at,
+      `SELECT j.id, j.job_type, j.status, j.position::text AS position, j.consumes_slot, j.holds_directory, j.held_at,
               j.attempt, j.max_attempts, j.available_at, j.created_at, j.locked_by, j.locked_at, j.last_error,
               j.task_id, t.state AS task_state,
               COALESCE(j.project_id, t.project_id) AS project_id,
@@ -295,6 +322,28 @@ export class JobQueue {
       [limit],
     );
     return camelizeAll<QueueEntry>(rows);
+  }
+
+  /**
+   * Hands back every running job, because the workers holding them have just
+   * been stopped.
+   *
+   * The lease exists so that a worker that dies unnoticed cannot have its job
+   * taken by a second worker while it is still running. That is the right rule
+   * for a crash, where nobody knows whether the process is alive. It is the
+   * wrong rule for a deliberate stop, where we do know: the processes were just
+   * killed, so nothing is running, and waiting out a fifteen-minute lease means
+   * the project's directory stays locked for fifteen minutes after a restart.
+   *
+   * Called by the stop script, after the processes are gone and before anything
+   * starts again.
+   */
+  async releaseAllRunning(): Promise<number> {
+    const rows = await this.db.query(
+      `UPDATE jobs SET status = 'PENDING', locked_by = NULL, locked_at = NULL, available_at = now()
+       WHERE status = 'RUNNING' RETURNING id`,
+    );
+    return rows.length;
   }
 
   /**
@@ -318,6 +367,26 @@ export class JobQueue {
     const stats: Record<string, number> = {};
     for (const row of rows) stats[row.status] = Number(row.count);
     return stats;
+  }
+
+  /**
+   * Whether a project's working directory is being held by a running job.
+   *
+   * The chat reads this: it does not queue behind a story, it answers read-only
+   * while one is running and says so. Making a person wait for a fix cycle to
+   * finish before they can ask a question would defeat the point of the window.
+   */
+  async directoryBusy(projectId: string): Promise<boolean> {
+    const row = await this.db.queryOne<{ count: string }>(
+      `SELECT (
+         (SELECT COUNT(*) FROM jobs
+           WHERE status = 'RUNNING' AND holds_directory AND project_id = $1)
+         + (SELECT COUNT(*) FROM projects
+             WHERE id = $1 AND merge_conflict_task_id IS NOT NULL)
+       )::text AS count`,
+      [projectId],
+    );
+    return Number(row?.count ?? 0) > 0;
   }
 
   /** How many slots are in use right now, for the queue header. */

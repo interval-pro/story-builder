@@ -46,6 +46,12 @@ export const EVENT_TYPES = [
   'InstallationCandidateReady',
   'InstallationApplyStarted',
   'InstallationApplyFinished',
+  /** A finished story was rebased and merged into the project's work branch. */
+  'StoryMerged',
+  /** The merge stopped on conflicts and the working tree is waiting for someone. */
+  'MergeConflicted',
+  /** The merge was undone, putting the work branch back where it was. */
+  'MergeUndone',
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];

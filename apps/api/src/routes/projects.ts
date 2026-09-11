@@ -1,6 +1,4 @@
-import { rm } from 'node:fs/promises';
-import path from 'node:path';
-import { HttpRouter, loadConfig, ValidationError } from '@ai-engine/shared';
+import { HttpRouter, ValidationError } from '@ai-engine/shared';
 import { GitClient } from '@ai-engine/git';
 import { requireBody, type ApiContext } from '../context';
 
@@ -62,8 +60,30 @@ export function registerProjectRoutes(router: HttpRouter, context: ApiContext): 
   });
 
   router.put('/api/projects/:id', async ({ params, body }) => {
-    const input = (body ?? {}) as { name?: string; description?: string; defaultBranch?: string };
-    return { project: await context.repos.projects.update(params['id']!, input) };
+    const input = (body ?? {}) as {
+      name?: string;
+      description?: string;
+      defaultBranch?: string;
+      workBranch?: string;
+    };
+    const project = await context.repos.projects.getById(params['id']!);
+
+    // The branch stories start from and are merged back into. It has to exist,
+    // because the alternative is finding out at the end of a story that there
+    // was nowhere to put it.
+    if (input.workBranch && input.workBranch !== project.workBranch) {
+      const git = new GitClient(project.repoPath);
+      if (!(await git.branchExists(input.workBranch))) {
+        throw new ValidationError(`${project.name} has no branch called ${input.workBranch}`);
+      }
+    }
+    return { project: await context.repos.projects.update(project.id, input) };
+  });
+
+  /** The branches a project could be worked against, for the picker. */
+  router.get('/api/projects/:id/branches', async ({ params }) => {
+    const project = await context.repos.projects.getById(params['id']!);
+    return { branches: await new GitClient(project.repoPath).listBranches() };
   });
 
   /** Queues the setup again, for a project whose first attempt failed. */
@@ -92,11 +112,11 @@ export function registerProjectRoutes(router: HttpRouter, context: ApiContext): 
   });
 
   /**
-   * Removes a project, its history and the files on disk that belonged to it.
+   * Removes a project and everything this system accumulated about it.
    *
-   * The repository itself is never touched: it is the owner's code and was only
-   * ever read and copied into worktrees. What goes is everything this system
-   * accumulated about it, which is the only thing it is entitled to delete.
+   * The repository itself is never touched, and there is nothing of ours in it
+   * to remove: nothing was ever written there. What goes is rows, which is the
+   * only thing this system is entitled to delete.
    */
   router.delete('/api/projects/:id', async ({ params, query }) => {
     const project = await context.repos.projects.getById(params['id']!);
@@ -114,26 +134,12 @@ export function registerProjectRoutes(router: HttpRouter, context: ApiContext): 
       );
     }
 
-    const config = loadConfig();
-    const tasks = await context.repos.tasks.listByProject(project.id, 1000);
     await context.repos.projects.remove(project.id);
 
-    // The database cascade takes the rows; these are the directories those rows
-    // pointed at. Removal is best-effort on purpose: a project is gone from the
-    // cockpit either way, and a leftover directory is tidier to find than a
-    // half-deleted project.
-    const removed: string[] = [];
-    for (const task of tasks) {
-      const workspace = path.join(config.paths.workspacesRoot, `task-${task.id}`);
-      await rm(workspace, { recursive: true, force: true })
-        .then(() => removed.push(workspace))
-        .catch(() => undefined);
-    }
-    const artifacts = path.join(config.paths.artifactsRoot, project.id);
-    await rm(artifacts, { recursive: true, force: true })
-      .then(() => removed.push(artifacts))
-      .catch(() => undefined);
-
-    return { removed: project.id, name: project.name, directoriesRemoved: removed.length };
+    // Nothing else to clean up. Everything this project accumulated — stories,
+    // runs, findings, artifacts — was a row, and the cascade took all of it. The
+    // directory on disk is the person's own repository and is left exactly as it
+    // was found, minus the branches their stories made.
+    return { removed: project.id, name: project.name };
   });
 }
