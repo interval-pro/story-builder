@@ -1,7 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { api, type ReviewDocument, type ReviewNote, type ReviewVersion, type SectionDiff } from '../lib/api';
+import { clearDraft, readDraft } from '../lib/draft-field';
+import { DraftTextarea } from './draft-textarea';
 
 interface Props {
   taskId: string;
@@ -19,7 +21,12 @@ interface Props {
  */
 export function ReviewView({ taskId, reviewId, version, notes, diff, canAct, onChanged }: Props) {
   const [selection, setSelection] = useState<{ text: string; sectionKey: string | null } | null>(null);
-  const [noteText, setNoteText] = useState('');
+  const noteRef = useRef<HTMLTextAreaElement>(null);
+  // Only gates the button. The note itself is read off the element on submit.
+  const [noteLength, setNoteLength] = useState(0);
+  // The note card unmounts on Cancel, so the element takes its text with it.
+  // This keeps a half-written note for the next selection, as it does today.
+  const retainedNote = useRef('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDiff, setShowDiff] = useState(false);
@@ -32,7 +39,16 @@ export function ReviewView({ taskId, reviewId, version, notes, diff, canAct, onC
   }
 
   async function addNote() {
-    if (!selection || noteText.trim().length === 0) return;
+    if (!selection) return;
+    const text = readDraft(noteRef.current);
+    if (text.trim().length === 0) {
+      // The length state can lag a dropped input event in either direction, so
+      // the button can be live over an empty box. Say so rather than doing
+      // nothing, which would be a second silent failure.
+      setError('A note needs some text.');
+      return;
+    }
+    setError(null);
     setBusy(true);
     try {
       await api.post(`/api/tasks/${taskId}/review/notes`, {
@@ -40,10 +56,14 @@ export function ReviewView({ taskId, reviewId, version, notes, diff, canAct, onC
         reviewVersionId: version.id,
         sectionKey: selection.sectionKey,
         anchorText: selection.text,
-        note: noteText,
+        note: text,
       });
+      // Clear the element and the retained copy together, otherwise the next
+      // selection reopens the card holding the note that was just submitted.
+      clearDraft(noteRef.current);
+      retainedNote.current = '';
+      setNoteLength(0);
       setSelection(null);
-      setNoteText('');
       onChanged();
     } catch (noteError) {
       setError(noteError instanceof Error ? noteError.message : String(noteError));
@@ -105,14 +125,15 @@ export function ReviewView({ taskId, reviewId, version, notes, diff, canAct, onC
           <div className="note">
             <div className="anchor">{selection.text.slice(0, 400)}</div>
           </div>
-          <textarea
+          <DraftTextarea
+            textareaRef={noteRef}
             rows={3}
-            value={noteText}
             placeholder="Do not create another service. Extend the existing NotificationService."
-            onChange={(event) => setNoteText(event.target.value)}
+            onLengthChange={setNoteLength}
+            retain={retainedNote}
           />
           <div className="actions">
-            <button onClick={() => void addNote()} disabled={busy || noteText.trim().length === 0}>
+            <button onClick={() => void addNote()} disabled={busy || noteLength === 0}>
               Add note
             </button>
             <button className="secondary" onClick={() => setSelection(null)}>

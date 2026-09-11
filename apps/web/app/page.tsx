@@ -1,16 +1,20 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api, type Project, type Story } from '../lib/api';
 import { relativeAge } from '../lib/relative-time';
+import { clearDraft, readDraft } from '../lib/draft-field';
+import { DraftTextarea } from '../components/draft-textarea';
 import { RiskBadge, StateBadge } from '../components/state-badge';
 
 export default function StoriesPage() {
   const [stories, setStories] = useState<Story[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState<string>('');
-  const [body, setBody] = useState('');
+  const draftRef = useRef<HTMLTextAreaElement>(null);
+  // Only gates the button. The story itself is read off the element on submit.
+  const [draftLength, setDraftLength] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -46,10 +50,23 @@ export default function StoriesPage() {
   }, [projectId]);
 
   async function create() {
+    // The element, not the length state, decides what is sent: a dropped input
+    // event can leave the length behind, and the API rejects under ten
+    // characters, so the two gates must agree on the same text.
+    const text = readDraft(draftRef.current);
+    if (text.trim().length < 10) {
+      // The length state can lag a dropped input event in either direction, so
+      // the button can be live over text the API would reject. Say so rather
+      // than doing nothing, which would be a second silent failure.
+      setError('A story needs at least ten characters.');
+      return;
+    }
+    setError(null);
     setCreating(true);
     try {
-      await api.post('/api/stories', { body, projectId });
-      setBody('');
+      await api.post('/api/stories', { body: text, projectId });
+      clearDraft(draftRef.current);
+      setDraftLength(0);
       const result = await api.get<{ stories: Story[] }>(`/api/stories?projectId=${projectId}`);
       setStories(result.stories);
     } catch (createError) {
@@ -83,14 +100,14 @@ export default function StoriesPage() {
       ) : null}
 
       <div className="card">
-        <textarea
+        <DraftTextarea
+          textareaRef={draftRef}
           rows={5}
-          value={body}
           placeholder={'When a user changes their email address, send a verification email and do not treat the new address as verified until the verification completes.'}
-          onChange={(event) => setBody(event.target.value)}
+          onLengthChange={setDraftLength}
         />
         <div className="actions">
-          <button onClick={() => void create()} disabled={creating || !projectId || body.trim().length < 10}>
+          <button onClick={() => void create()} disabled={creating || !projectId || draftLength < 10}>
             {creating ? 'Creating...' : 'Create story'}
           </button>
         </div>

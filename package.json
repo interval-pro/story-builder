@@ -15,7 +15,7 @@
     "build": "tsc -b tsconfig.build.json",
     "build:clean": "tsc -b tsconfig.build.json --clean",
     "typecheck": "tsc -b tsconfig.build.json --pretty",
-    "test": "node --import ./scripts/register-source.mjs --test \"packages/*/test/*.test.ts\"",
+    "test": "node --import ./scripts/register-source.mjs --test \"packages/*/test/*.test.ts\" \"apps/*/test/*.test.ts\"",
     "lint": "eslint . --ext .ts,.tsx",
     "migrate": "node packages/db/dist/cli/migrate.js",
     "db:reset": "npm run migrate -- --reset",
