@@ -54,6 +54,15 @@ export interface AgentEngineConfig {
   claudeTimeoutMs: number;
   /** Budget for the pass that writes the answer. Defaults to claudeTimeoutMs. */
   claudeResultTimeoutMs: number;
+  /**
+   * Lets an agent delegate to a subagent. Off, and it should stay off: each
+   * subagent opens its own context window, and none of the five agents has a
+   * reason to delegate. If it is ever turned on, one subagent at a time is the
+   * limit. Several at once is exactly the shape that multiplies spend, and
+   * nothing in this lifecycle needs fan-out. The CLI has no flag for that limit,
+   * so it is a contract on whoever turns this on, not something we enforce.
+   */
+  allowSubagents: boolean;
 }
 
 export interface GitHubConfig {
@@ -169,6 +178,7 @@ export function loadConfig(reload = false): SystemConfig {
       claudeModel: optional('CLAUDE_MODEL'),
       claudeTimeoutMs: int('CLAUDE_TIMEOUT_MS', 3_600_000),
       claudeResultTimeoutMs: int('CLAUDE_RESULT_TIMEOUT_MS', int('CLAUDE_TIMEOUT_MS', 3_600_000)),
+      allowSubagents: bool('AGENT_ALLOW_SUBAGENTS', false),
     },
     github: {
       token: optional('GITHUB_TOKEN'),

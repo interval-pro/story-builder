@@ -186,6 +186,7 @@ ones that change behaviour most:
 | --- | --- |
 | `PROJECT_ROOT` | The repository this installation manages |
 | `AGENT_ENGINE` | `claude-code` (default) or `builtin` |
+| `AGENT_ALLOW_SUBAGENTS` | `false` (default). Lets an agent delegate. If you turn it on, one subagent at a time is the limit; the CLI cannot enforce that |
 | `AI_PROVIDER` | Only for the builtin engine: `anthropic`, `openai` or `mock` |
 | `SANDBOX_DOCKER_ENABLED` | `false` runs tasks in host worktrees instead of containers |
 | `MAX_QA_ITERATIONS` | How many fix cycles before a task is blocked |

@@ -6,7 +6,14 @@ import { ConflictEngine } from '@ai-engine/conflict-engine';
 import { GitClient } from '@ai-engine/git';
 import { writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { buildProjectContext, createAgentRunner, createExecutor, type JobContext } from '../job-context';
+import {
+  buildProjectContext,
+  createAgentRunner,
+  createExecutor,
+  recordEngineMetrics,
+  runCompletion,
+  type JobContext,
+} from '../job-context';
 import { SandboxClient } from '../sandbox-client';
 
 const logger = createLogger('maintenance');
@@ -29,7 +36,7 @@ export async function handleLearning(context: JobContext): Promise<void> {
     phase: 'FINAL_REPORT',
     agentType: 'learning',
   });
-  const result = await runLearningAgent({
+  const { result, outcome } = await runLearningAgent({
     runner: await createAgentRunner({ context, runId: learningRun.id, phase: 'FINAL_REPORT' }),
     projectContext: await buildProjectContext(context),
     storyBody: context.revision.body,
@@ -39,7 +46,10 @@ export async function handleLearning(context: JobContext): Promise<void> {
     qaSummaries: qaRuns.flatMap((run) => run.findings.map((finding) => finding.summary)),
     installRoot: context.installRoot,
   });
-  await context.repos.runs.complete(learningRun.id);
+  // The fifth agent used to record nothing at all, which made it the one agent
+  // whose spend a per-agent breakdown could not show.
+  await context.repos.runs.complete(learningRun.id, outcome ? runCompletion(outcome) : undefined);
+  if (outcome) await recordEngineMetrics(context, 'learning', outcome);
 
   for (const principle of result.principles) {
     const { principle: stored, created } = await context.brain.recordPrinciple(context.project.id, principle, {

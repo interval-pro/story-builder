@@ -15,6 +15,8 @@ import {
   createAgentRunner,
   recordEngineMetrics,
   resolveAgentVersion,
+  runCompletion,
+  taskArtifactsPathFor,
   type JobContext,
 } from '../job-context';
 import { SandboxClient } from '../sandbox-client';
@@ -129,7 +131,7 @@ export async function handleResearch(context: JobContext): Promise<void> {
       contentType: 'text/markdown',
       content: outcome.transcript,
     });
-    await context.repos.runs.complete(researchRun.id, outcome.usage);
+    await context.repos.runs.complete(researchRun.id, runCompletion(outcome));
     await recordEngineMetrics(context, 'research', outcome);
     await context.events.append({
       projectId: context.project.id,
@@ -146,6 +148,40 @@ export async function handleResearch(context: JobContext): Promise<void> {
     await context.repos.runs.fail(researchRun.id, error instanceof Error ? error.message : String(error));
     throw error;
   }
+}
+
+/**
+ * Where the review agent can read the full findings. A regeneration resolves the
+ * same file the first review was pointed at. Null when no such artifact exists,
+ * which makes the caller inline the findings rather than point at nothing.
+ */
+async function findingsArtifactPath(context: JobContext): Promise<string | null> {
+  const record = await context.repos.artifacts.latestByKind(context.task.id, 'research_findings');
+  if (!record) {
+    context.logger.warn('no research findings artifact to point the review at, sending them inline instead');
+    return null;
+  }
+  return context.artifacts.localPath(record);
+}
+
+/**
+ * The digest is a smaller prompt only if the agent reads the rest. A review that
+ * skipped the read comes out thinner with nothing failing, so the skip is
+ * recorded. This never fails the task: the review itself is still valid.
+ */
+async function checkFindingsWereRead(context: JobContext, runId: string, findingsPath: string): Promise<void> {
+  const calls = await context.repos.toolCalls.listByRun(runId);
+  const read = calls.some((call) => JSON.stringify(call.input).includes(findingsPath));
+  if (read) return;
+
+  context.logger.warn('the review agent never read the findings it was pointed at', { findingsPath });
+  await context.repos.metrics.record({
+    projectId: context.project.id,
+    taskId: context.task.id,
+    name: 'review_findings_unread',
+    value: 1,
+    labels: { agent: 'review' },
+  });
 }
 
 /** Shared by the first review and every regeneration after human notes. */
@@ -171,7 +207,17 @@ export async function generateReview(
       fileCount: input.findings.relevantFiles.length,
       riskSignalCount: input.findings.riskSignals.length,
     });
-    const runner = await createAgentRunner({ context, runId: reviewRun.id, phase: 'REVIEW', size });
+
+    // The findings are already an artifact, so the prompt points at them instead
+    // of carrying tens of kilobytes inline on every run and every regeneration.
+    const findingsPath = await findingsArtifactPath(context);
+    const runner = await createAgentRunner({
+      context,
+      runId: reviewRun.id,
+      phase: 'REVIEW',
+      size,
+      ...(findingsPath ? { additionalDirectories: [taskArtifactsPathFor(context.project.id, context.task.id)] } : {}),
+    });
 
     const { document, outcome, problems } = await runReviewAgent({
       runner,
@@ -180,6 +226,7 @@ export async function generateReview(
       revision: context.revision,
       task: context.task,
       findings: input.findings,
+      findingsPath,
       installRoot: context.installRoot,
       ...(input.previousReview ? { previousReview: input.previousReview } : {}),
     });
@@ -217,8 +264,9 @@ export async function generateReview(
       contentType: 'text/markdown',
       content: outcome.transcript,
     });
-    await context.repos.runs.complete(reviewRun.id, outcome.usage);
+    await context.repos.runs.complete(reviewRun.id, runCompletion(outcome));
     await recordEngineMetrics(context, 'review', outcome);
+    if (findingsPath) await checkFindingsWereRead(context, reviewRun.id, findingsPath);
 
     await context.orchestrator.transition({
       taskId: context.task.id,

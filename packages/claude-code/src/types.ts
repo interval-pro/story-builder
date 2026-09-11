@@ -10,6 +10,8 @@ export interface ClaudeCliOptions {
   resumeSessionId?: string;
   allowedTools?: string[];
   disallowedTools?: string[];
+  /** Directories outside cwd the tools may also reach, one `--add-dir` each. */
+  additionalDirectories?: string[];
   /** Removes the built-in tools that run commands or code. */
   restricted?: boolean;
   permissionMode?: 'acceptEdits' | 'auto' | 'bypassPermissions' | 'manual' | 'dontAsk' | 'plan';
@@ -44,7 +46,11 @@ export interface ClaudeResult {
   numTurns: number;
   durationMs: number;
   costUsd: number;
-  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number };
+  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number };
+  /** Per-model token counts, shape unspecified by the CLI. Null when absent. */
+  modelUsage: Record<string, unknown> | null;
+  /** What the run spent on subagents. Null when the CLI reported nothing. */
+  subagentStats: Record<string, unknown> | null;
   /** Actions the CLI refused. An empty list is part of the verification. */
   permissionDenials: unknown[];
   terminalReason: string | null;

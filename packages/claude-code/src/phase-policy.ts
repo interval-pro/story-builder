@@ -17,24 +17,51 @@ const FORBIDDEN_COMMANDS = [
   'Bash(rm -rf /:*)',
 ];
 
+/**
+ * Delegation. Each subagent opens its own context window, and none of the five
+ * agents has a reason to delegate: each has a narrow job, its own prompt and its
+ * own worktree. `Agent` and `Task` are the same tool under two names across CLI
+ * versions, and the rest only mean anything once a subagent exists. Denying a
+ * name this CLI does not have costs nothing; missing one defeats the purpose.
+ */
+const DELEGATION_TOOLS = ['Agent', 'Task', 'SendMessage', 'ListAgents', 'TaskOutput', 'TaskStop'];
+
+/**
+ * Harness discovery, denied in every phase whatever the subagent setting says.
+ * An agent that spends turns finding out what tools exist is not doing the work
+ * it was given, and every tool it actually needs is already in its prompt.
+ */
+const DISCOVERY_TOOLS = ['ToolSearch'];
+
 export type PhasePolicy = Pick<
   ClaudeCliOptions,
   'restricted' | 'permissionMode' | 'allowedTools' | 'disallowedTools' | 'effort'
 >;
+
+export interface PolicyOptions {
+  /** Defaults to false. Set from AGENT_ALLOW_SUBAGENTS, never read here. */
+  allowSubagents?: boolean;
+}
+
+/** The denials every pass of every phase carries, on top of its own. */
+function overheadTools(options: PolicyOptions): string[] {
+  return options.allowSubagents ? DISCOVERY_TOOLS : [...DISCOVERY_TOOLS, ...DELEGATION_TOOLS];
+}
 
 /**
  * Translates the capability model onto the CLI's own permission flags. The
  * read-only phases are enforced twice: the CLI refuses the tools, and in Docker
  * mode the workspace is mounted read-only underneath it.
  */
-export function policyForPhase(phase: ExecutionPhase): PhasePolicy {
+export function policyForPhase(phase: ExecutionPhase, options: PolicyOptions = {}): PhasePolicy {
+  const overhead = overheadTools(options);
   switch (phase) {
     case 'RESEARCH':
     case 'REVIEW':
       return {
         restricted: true,
         permissionMode: 'dontAsk',
-        disallowedTools: EDIT_TOOLS,
+        disallowedTools: [...EDIT_TOOLS, ...overhead],
         effort: 'high',
       };
     case 'QA':
@@ -42,14 +69,14 @@ export function policyForPhase(phase: ExecutionPhase): PhasePolicy {
       return {
         restricted: true,
         permissionMode: 'dontAsk',
-        disallowedTools: EDIT_TOOLS,
+        disallowedTools: [...EDIT_TOOLS, ...overhead],
         effort: 'xhigh',
       };
     case 'IMPLEMENTATION':
     case 'INTEGRATION':
       return {
         permissionMode: 'acceptEdits',
-        disallowedTools: FORBIDDEN_COMMANDS,
+        disallowedTools: [...FORBIDDEN_COMMANDS, ...overhead],
         effort: 'xhigh',
       };
     case 'PUSH':
@@ -57,10 +84,26 @@ export function policyForPhase(phase: ExecutionPhase): PhasePolicy {
       return {
         restricted: true,
         permissionMode: 'dontAsk',
-        disallowedTools: [...EDIT_TOOLS, ...FORBIDDEN_COMMANDS],
+        disallowedTools: [...EDIT_TOOLS, ...FORBIDDEN_COMMANDS, ...overhead],
         effort: 'low',
       };
   }
+}
+
+/** Tools the answer pass has no use for: it reads nothing and writes JSON. */
+const ANSWER_PASS_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch'];
+
+/**
+ * The pass that asks for the structured answer. It is the same boundary as a
+ * phase policy, so it is built here rather than a second time at the call site:
+ * a denial added in one place has to reach both or the hole is invisible.
+ */
+export function answerPassPolicy(options: PolicyOptions = {}): PhasePolicy {
+  return {
+    restricted: true,
+    permissionMode: 'dontAsk',
+    disallowedTools: [...ANSWER_PASS_TOOLS, ...overheadTools(options)],
+  };
 }
 
 /** True when the phase must not be able to change a single file. */

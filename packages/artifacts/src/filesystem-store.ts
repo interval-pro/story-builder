@@ -76,6 +76,10 @@ export class FilesystemArtifactStore implements ArtifactStore {
     }
   }
 
+  localPath(record: ArtifactRecord): string {
+    return this.resolve(record.storagePath);
+  }
+
   async getText(id: string): Promise<string> {
     const { content } = await this.get(id);
     return content.toString('utf8');

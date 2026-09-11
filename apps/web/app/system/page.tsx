@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api, type Task } from '../../lib/api';
 import { StateBadge } from '../../components/state-badge';
+import { formatTokens, formatUsd } from '../../lib/format';
 
 interface Status {
   project: { name: string; repoPath: string; defaultBranch: string; remoteUrl: string | null };
@@ -66,9 +67,28 @@ interface Health {
   sandboxEnabled: boolean;
 }
 
+interface AgentSpend {
+  agentType: string;
+  runs: number;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  unrecordedRuns: number;
+}
+
+interface Spend {
+  windowHours: number;
+  since: string;
+  total: AgentSpend;
+  byAgent: AgentSpend[];
+}
+
 export default function SystemPage() {
   const syncingRef = useRef(false);
   const [status, setStatus] = useState<Status | null>(null);
+  const [spend, setSpend] = useState<Spend | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [version, setVersion] = useState<Version | null>(null);
   const [apply, setApply] = useState<ApplyRecord | null>(null);
@@ -79,13 +99,15 @@ export default function SystemPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [statusResult, healthResult, versionResult, applyResult] = await Promise.all([
+        const [statusResult, healthResult, versionResult, applyResult, spendResult] = await Promise.all([
           api.get<Status>('/api/system/status'),
           api.get<Health>('/api/health'),
           api.get<Version>('/api/system/version').catch(() => null),
           api.get<{ apply: ApplyRecord | null }>('/api/system/apply').catch(() => ({ apply: null })),
+          api.get<Spend>('/api/system/spend').catch(() => null),
         ]);
         setStatus(statusResult);
+        setSpend(spendResult);
         setHealth(healthResult);
         setVersion(versionResult);
         setApply(applyResult.apply);
@@ -202,6 +224,35 @@ export default function SystemPage() {
           <div className="card-label">Knowledge</div>
           <div className="card-value">{status.knowledgeSnapshot ? `snapshot ${status.knowledgeSnapshot.sequence}` : 'none'}</div>
           <div className="card-detail">{status.knowledgeSnapshot?.gitCommit.slice(0, 10) ?? ''}</div>
+        </div>
+        <div className="card">
+          <div className="card-label">
+            Spend, last {spend ? spend.windowHours : 5} hours
+          </div>
+          <div className="card-value">{spend ? formatUsd(spend.total.costUsd) : 'unknown'}</div>
+          {spend ? (
+            <>
+              <div className="card-detail">
+                {spend.total.runs} run(s) · {formatTokens(spend.total.inputTokens)} in ·{' '}
+                {formatTokens(spend.total.outputTokens)} out · {formatTokens(spend.total.cacheReadTokens)} cache read
+              </div>
+              {spend.byAgent.map((agent) => (
+                <div key={agent.agentType} className="card-detail">
+                  {agent.agentType}: {agent.unrecordedRuns === agent.runs ? 'not recorded' : formatUsd(agent.costUsd)} over{' '}
+                  {agent.runs} run(s)
+                </div>
+              ))}
+              {spend.total.unrecordedRuns > 0 ? (
+                <div className="card-detail">{spend.total.unrecordedRuns} run(s) recorded no cost, so this total is partial.</div>
+              ) : null}
+              <div className="card-detail">
+                Cost per run is measured: it is the figure the engine itself reports. This total is derived by summing
+                the runs recorded in the window. It is not an account limit, which the engine does not report here.
+              </div>
+            </>
+          ) : (
+            <div className="card-detail">No spend has been recorded yet.</div>
+          )}
         </div>
         <div className="card">
           <div className="card-label">Jobs</div>

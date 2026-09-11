@@ -19,6 +19,12 @@ export interface ArtifactStore {
   put(input: PutArtifactInput): Promise<ArtifactRecord>;
   get(id: string): Promise<{ record: ArtifactRecord; content: Buffer }>;
   getText(id: string): Promise<string>;
+  /**
+   * Absolute path of the stored bytes, for handing an agent something to read
+   * instead of sending it inline on every run. A remote store would have to
+   * materialise a local copy.
+   */
+  localPath(record: ArtifactRecord): string;
   stream(id: string): Promise<Readable>;
   delete(id: string): Promise<void>;
 }

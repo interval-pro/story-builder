@@ -3,8 +3,9 @@ import type { AgentRunOutcome, AgentRunRequest, AgentRunner } from '@ai-engine/a
 import { runClaudeCli } from './cli';
 import { parseStructuredAnswer } from './structured-output';
 import { resultTimeoutFor } from './timeouts';
-import { policyForPhase, type PhasePolicy } from './phase-policy';
-import type { ClaudeStreamEvent } from './types';
+import { answerPassPolicy, policyForPhase, type PhasePolicy } from './phase-policy';
+import { mergeUsage, type PassUsage } from './usage';
+import type { ClaudeResult, ClaudeStreamEvent } from './types';
 
 const logger = createLogger('claude-code-runner');
 
@@ -23,11 +24,33 @@ export interface ClaudeCodeRunnerOptions {
    * biggest lever on what a run costs.
    */
   effort?: PhasePolicy['effort'];
+  /**
+   * Lets the agent delegate to a subagent. Off unless the installation turns it
+   * on; see AgentEngineConfig.allowSubagents for why, and for the one-at-a-time
+   * limit that applies if it ever is.
+   */
+  allowSubagents?: boolean;
+  /**
+   * Directories outside the worktree the work pass may read, passed as
+   * `--add-dir`. Used to hand an agent an artifact it would otherwise be sent
+   * inline on every run.
+   */
+  additionalDirectories?: string[];
   /** Called for every tool the CLI uses, so the audit log stays complete. */
   onToolUse?: (use: { name: string; input: Record<string, unknown> }) => void | Promise<void>;
 }
 
 
+
+/** What one pass spent, in the shape the merge works on. */
+function passUsage(result: ClaudeResult): PassUsage {
+  return {
+    usage: result.usage,
+    costUsd: result.costUsd,
+    modelUsage: result.modelUsage,
+    subagentStats: result.subagentStats,
+  };
+}
 
 /**
  * Runs each agent as a headless Claude Code session inside the task worktree.
@@ -41,7 +64,7 @@ export class ClaudeCodeAgentRunner implements AgentRunner {
   constructor(private readonly options: ClaudeCodeRunnerOptions) {}
 
   async run<T>(request: AgentRunRequest<T>): Promise<AgentRunOutcome<T>> {
-    const basePolicy = policyForPhase(request.phase);
+    const basePolicy = policyForPhase(request.phase, { allowSubagents: this.options.allowSubagents ?? false });
     const policy: PhasePolicy = this.options.effort ? { ...basePolicy, effort: this.options.effort } : basePolicy;
     const sessionId = request.resumeSessionId ?? newId();
     let iteration = 0;
@@ -54,6 +77,7 @@ export class ClaudeCodeAgentRunner implements AgentRunner {
       ...(this.options.model ? { model: this.options.model } : {}),
       ...(this.options.binary ? { binary: this.options.binary } : {}),
       ...(request.resumeSessionId ? { resumeSessionId: request.resumeSessionId } : { sessionId }),
+      ...(this.options.additionalDirectories?.length ? { additionalDirectories: this.options.additionalDirectories } : {}),
       ...policy,
       onEvent: async (event: ClaudeStreamEvent) => {
         const blocks = event.message?.content ?? [];
@@ -80,29 +104,29 @@ export class ClaudeCodeAgentRunner implements AgentRunner {
       });
     }
 
-    // Second pass: no tools, no edits, JSON only.
+    // Second pass: no tools, no edits, JSON only. It reads nothing, so it is
+    // given no additional directory either.
     const answer = await runClaudeCli({
       cwd: this.options.workspacePath,
       prompt: request.resultInstruction,
       timeoutMs: resultTimeoutFor(this.options),
       resumeSessionId: work.sessionId,
-      restricted: true,
-      permissionMode: 'dontAsk',
-      disallowedTools: ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch'],
+      ...answerPassPolicy({ allowSubagents: this.options.allowSubagents ?? false }),
       ...(this.options.model ? { model: this.options.model } : {}),
       ...(this.options.binary ? { binary: this.options.binary } : {}),
     });
+
+    const spend = mergeUsage(passUsage(work), passUsage(answer));
 
     return {
       result: request.validate(parseStructuredAnswer(answer.text)),
       transcript: work.transcript,
       toolCallCount: work.toolUses.length,
-      usage: {
-        inputTokens: work.usage.inputTokens + answer.usage.inputTokens,
-        outputTokens: work.usage.outputTokens + answer.usage.outputTokens,
-      },
+      usage: spend.usage,
       sessionId: work.sessionId,
-      costUsd: work.costUsd + answer.costUsd,
+      costUsd: spend.costUsd,
+      modelUsage: spend.modelUsage,
+      subagentStats: spend.subagentStats,
       permissionDenials: work.permissionDenials,
     };
   }

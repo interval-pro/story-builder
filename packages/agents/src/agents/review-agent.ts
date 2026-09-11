@@ -11,7 +11,7 @@ import {
 import { renderProjectContext, renderReviewWithNotes, renderStoryContext, type ProjectContext } from '../context';
 import { loadAgentPrompt } from '../prompts/prompt-loader';
 import { validateReviewDocument } from '../schemas';
-import { renderResearchFindings } from './research-agent';
+import { renderFindingsBrief, renderResearchFindings } from './research-agent';
 import type { ResearchFindings } from '../schemas';
 import type { AgentRunOutcome, AgentRunner, AgentStep } from '../runner';
 
@@ -22,6 +22,12 @@ export interface ReviewAgentInput {
   revision: StoryRevision;
   task: Task;
   findings: ResearchFindings;
+  /**
+   * Absolute path of the research findings artifact, which the prompt points at
+   * instead of carrying inline. Null when no such artifact exists, in which case
+   * the full findings are inlined rather than pointing the agent at nothing.
+   */
+  findingsPath: string | null;
   installRoot: string;
   /** Present when regenerating after human notes. */
   previousReview?: { document: ReviewDocument; notes: ReviewNote[] };
@@ -79,12 +85,15 @@ export async function runReviewAgent(
     riskSignalCount: input.findings.riskSignals.length,
   });
 
+  // Everything that does not change between a first review and its
+  // regenerations comes first: a prefix the cache can reuse is a prefix that is
+  // byte-identical, and the previous review is the only part that differs.
   const userParts = [
     renderStoryContext(input.story, input.revision, input.task),
     '',
     `## Scope\n\nThis change is ${size.toLowerCase()}. ${reviewBudgetFor(size).guidance}`,
     '',
-    renderResearchFindings(input.findings),
+    input.findingsPath ? renderFindingsBrief(input.findings, input.findingsPath) : renderResearchFindings(input.findings),
   ];
 
   if (input.previousReview) {

@@ -22,7 +22,8 @@ export interface AgentLoopResult {
   messages: ModelMessage[];
   iterations: number;
   toolCallCount: number;
-  usage: { inputTokens: number; outputTokens: number };
+  /** The cache counts are always zero: the provider response carries none. */
+  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number };
   stoppedBecause: 'end_turn' | 'max_iterations' | 'max_tokens';
 }
 
@@ -40,7 +41,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     .map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema }));
 
   let toolCallCount = 0;
-  const usage = { inputTokens: 0, outputTokens: 0 };
+  const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
   let finalText = '';
 
   for (let iteration = 1; iteration <= options.maxIterations; iteration++) {
