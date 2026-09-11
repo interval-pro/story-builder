@@ -3,6 +3,7 @@ import path from 'node:path';
 import { AppError, createLogger, loadConfig, type Logger } from '@ai-engine/shared';
 import {
   capabilitiesForPhase,
+  shouldResumeFailedRun,
   type ExecutionPhase,
   type Job,
   type Project,
@@ -279,6 +280,10 @@ export function runCompletion(outcome: {
   costUsd: number | null;
   modelUsage: Record<string, unknown> | null;
   subagentStats: Record<string, unknown> | null;
+  sessionId?: string | null;
+  resumed?: boolean | null;
+  effort?: string | null;
+  model?: string | null;
 }): RunCompletion {
   return {
     inputTokens: outcome.usage.inputTokens,
@@ -288,7 +293,111 @@ export function runCompletion(outcome: {
     costUsd: outcome.costUsd,
     modelUsage: outcome.modelUsage,
     subagentStats: outcome.subagentStats,
+    // The id the engine actually reported, which replaces the one written when
+    // the session opened. They are the same unless the CLI renamed the session.
+    // An engine that reports no id at all leaves the recorded one standing
+    // rather than overwriting it with nothing.
+    sessionId: outcome.sessionId || null,
+    resumed: outcome.resumed ?? null,
+    effort: outcome.effort ?? null,
+    model: outcome.model ?? null,
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * What a failed run spent, read off the error the engine rejected with.
+ *
+ * The CLI builds a full result, usage and all, and only then discovers the run
+ * reported an error; that result is attached to the rejection rather than
+ * discarded. A timeout has nothing to attach and returns null, so the run keeps
+ * whatever was recorded when it started.
+ */
+function runFailureSpend(error: unknown): RunCompletion | undefined {
+  const details = error instanceof AppError ? error.details : undefined;
+  if (!details) return undefined;
+
+  const rawUsage = details['usage'];
+  const usage =
+    rawUsage && typeof rawUsage === 'object'
+      ? (rawUsage as { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheCreationTokens?: number })
+      : null;
+
+  // An empty id is what the CLI reports when it never named a session, and it is
+  // not a value the run record can hold.
+  const rawSessionId = details['sessionId'];
+  const sessionId = typeof rawSessionId === 'string' && rawSessionId.length > 0 ? rawSessionId : null;
+  if (!usage && !sessionId) return undefined;
+
+  const costUsd = details['costUsd'];
+  const modelUsage = details['modelUsage'];
+  const subagentStats = details['subagentStats'];
+
+  const spend: RunCompletion = {
+    costUsd: typeof costUsd === 'number' ? costUsd : null,
+    modelUsage: isRecord(modelUsage) ? modelUsage : null,
+    subagentStats: isRecord(subagentStats) ? subagentStats : null,
+    sessionId,
+  };
+  if (usage) {
+    spend.inputTokens = usage.inputTokens ?? 0;
+    spend.outputTokens = usage.outputTokens ?? 0;
+    spend.cacheReadTokens = usage.cacheReadTokens ?? 0;
+    spend.cacheCreationTokens = usage.cacheCreationTokens ?? 0;
+  }
+  return spend;
+}
+
+/**
+ * Records a failed run along with what it spent before it failed.
+ *
+ * Every handler's catch goes through here so the numbers a failed run
+ * contributes are the same whichever phase produced it.
+ */
+export async function failRun(context: JobContext, runId: string, error: unknown): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error);
+  const spend = runFailureSpend(error);
+  await context.repos.runs.fail(runId, message, spend);
+}
+
+/**
+ * Writes the session a run is about to use onto its row, before the engine
+ * spawns anything. Handlers hand this to the agent as onSessionStart.
+ */
+export function recordSessionStart(
+  context: JobContext,
+  runId: string,
+  resumed: boolean,
+): (sessionId: string) => Promise<void> {
+  return async (sessionId: string) => {
+    await context.repos.runs.recordSession(runId, { sessionId, resumed });
+  };
+}
+
+/**
+ * The session of a recent failed run for this phase, when continuing it is
+ * worth trying.
+ *
+ * Called before the new run is started, so it reads the previous attempt rather
+ * than the one about to begin. The attempt itself is what establishes whether
+ * the session can still be read back: a recorded id is only a bookkeeping
+ * record, and asking the CLI to resume a dead one costs a single fast
+ * rejection, against a whole repository re-read for starting cold when it was
+ * still warm.
+ */
+export async function resumableSessionFor(context: JobContext, phase: ExecutionPhase): Promise<string | null> {
+  const previous = await context.repos.runs.latestForPhase(context.task.id, phase);
+  if (!shouldResumeFailedRun(previous, new Date())) return null;
+
+  context.logger.info('continuing the session of an attempt that failed recently', {
+    phase,
+    runId: previous!.id,
+    sessionId: previous!.sessionId,
+  });
+  return previous!.sessionId;
 }
 
 /** True when the engine reported a subagent actually doing something. */

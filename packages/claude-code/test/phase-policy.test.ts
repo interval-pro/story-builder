@@ -77,6 +77,49 @@ test('the answer pass denies the same overhead as the work pass', () => {
   }
 });
 
+/**
+ * The effort each phase runs its work pass at today. Pinned so that holding the
+ * effort across a session can be shown to have lowered nothing: the story allows
+ * the two passes of one run to stop disagreeing, and forbids buying the saving
+ * by reasoning less.
+ */
+const WORK_PASS_EFFORT = {
+  RESEARCH: 'high',
+  REVIEW: 'high',
+  IMPLEMENTATION: 'xhigh',
+  QA: 'xhigh',
+  FINAL_REPORT: 'xhigh',
+  INTEGRATION: 'xhigh',
+  PUSH: 'low',
+} as const;
+
+test('no phase reasons less than it did before', () => {
+  for (const phase of ALL_PHASES) {
+    assert.equal(policyForPhase(phase).effort, WORK_PASS_EFFORT[phase], `${phase} must keep its effort`);
+  }
+});
+
+test('the answer pass runs at the effort it is given', () => {
+  assert.equal(answerPassPolicy({ effort: 'xhigh' }).effort, 'xhigh');
+  assert.equal(answerPassPolicy({ effort: 'low' }).effort, 'low');
+});
+
+test('both passes of one run ask for the same effort', () => {
+  // They share a session. An effort that changes between them rebuilds the
+  // prompt cache from scratch, which used to happen on every run of every phase
+  // because the work pass set the flag and the answer pass left it off.
+  for (const phase of ALL_PHASES) {
+    const work = policyForPhase(phase);
+    const answer = answerPassPolicy({ effort: work.effort });
+    assert.equal(answer.effort, work.effort, `${phase} must not change effort mid-session`);
+  }
+});
+
+test('an answer pass given no effort sends none, so the CLI keeps its own', () => {
+  assert.equal(answerPassPolicy().effort, undefined);
+  assert.equal('effort' in answerPassPolicy(), false);
+});
+
 test('no phase is allowed to write and push at the same time', () => {
   for (const phase of ALL_PHASES) {
     const policy = policyForPhase(phase);

@@ -8,8 +8,11 @@ import {
   createAgentRunner,
   commitWorkspace,
   ensureDependencies,
+  failRun,
   recordEngineMetrics,
+  recordSessionStart,
   resolveAgentVersion,
+  resumableSessionFor,
   runCompletion,
   workspacePathFor,
   type JobContext,
@@ -68,18 +71,32 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
 
   const prompt = await loadAgentPrompt('implementation', context.installRoot);
   const agentVersionId = await resolveAgentVersion(context, 'implementation', prompt);
+
+  // A run that failed recently takes precedence over the last transcript: it is
+  // the newer session, and it is the one that still has the work in it.
+  // A fix cycle otherwise continues the session that wrote the code originally.
+  const failedSessionId = await resumableSessionFor(context, 'IMPLEMENTATION');
+  const previousSessionId =
+    failedSessionId ?? (mode === 'FIX' ? await lastImplementationSession(context) : null);
+
   const run = await context.repos.runs.start({
     taskId: context.task.id,
     phase: 'IMPLEMENTATION',
     agentType: 'implementation',
     agentVersionId,
+    sessionId: previousSessionId,
+    ...(previousSessionId ? { resumed: true } : {}),
   });
 
   try {
-    const size = classifyTaskSize({
-      fileCount: approved.document.expectedFiles.length,
-      riskSignalCount: approved.document.riskSignals.length,
-    });
+    // Classified once by the review and held since; a task from before that was
+    // recorded has none, so it is worked out here instead.
+    const size =
+      context.task.size ??
+      classifyTaskSize({
+        fileCount: approved.document.expectedFiles.length,
+        riskSignalCount: approved.document.riskSignals.length,
+      });
     const runner = await createAgentRunner({
       context,
       runId: run.id,
@@ -87,8 +104,6 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
       allowWeb: false,
       size,
     });
-    // A fix cycle continues the session that wrote the code in the first place.
-    const previousSessionId = mode === 'FIX' ? await lastImplementationSession(context) : null;
 
     const { outcome, run: agentRun } = await runImplementationAgent({
       runner,
@@ -99,6 +114,7 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
       approvedReview: approved.document,
       runtimeManifest: manifest?.manifest ?? null,
       installRoot: context.installRoot,
+      onSessionStart: recordSessionStart(context, run.id, Boolean(previousSessionId)),
       ...(qaFindings.length > 0 ? { qaFindings, qaIteration: context.task.qaIteration } : {}),
       ...(previousSessionId ? { resumeSessionId: previousSessionId } : {}),
     });
@@ -192,7 +208,7 @@ export async function handleImplementation(context: JobContext, mode: 'IMPLEMENT
       payload: { changedFiles: changes.length },
     });
   } catch (error) {
-    await context.repos.runs.fail(run.id, error instanceof Error ? error.message : String(error));
+    await failRun(context, run.id, error);
     throw error;
   }
 }

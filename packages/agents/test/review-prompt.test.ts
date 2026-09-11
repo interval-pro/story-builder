@@ -40,19 +40,28 @@ const DOCUMENT = {
   openQuestions: [],
 };
 
-/** Captures the prompt the review agent would have been sent. */
-function capturingRunner(): { runner: AgentRunner; prompt: () => string } {
+/** Captures the request the review agent would have been sent. */
+function capturingRunner(): {
+  runner: AgentRunner;
+  prompt: () => string;
+  request: () => AgentRunRequest<unknown>;
+} {
   let captured = '';
+  let capturedRequest: AgentRunRequest<unknown> | null = null;
   const runner: AgentRunner = {
     kind: 'capturing',
     async run<T>(request: AgentRunRequest<T>): Promise<AgentRunOutcome<T>> {
       captured = request.prompt;
+      capturedRequest = request as AgentRunRequest<unknown>;
       return {
         result: request.validate(DOCUMENT),
         transcript: '',
         toolCallCount: 0,
         usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
         sessionId: null,
+        resumed: null,
+        effort: null,
+        model: null,
         costUsd: null,
         modelUsage: null,
         subagentStats: null,
@@ -60,13 +69,21 @@ function capturingRunner(): { runner: AgentRunner; prompt: () => string } {
       };
     },
   };
-  return { runner, prompt: () => captured };
+  return {
+    runner,
+    prompt: () => captured,
+    request: () => {
+      if (!capturedRequest) throw new Error('the runner was never called');
+      return capturedRequest;
+    },
+  };
 }
 
 async function promptFor(
   previousReview?: { document: ReviewDocument; notes: [] },
-): Promise<{ prompt: string; document: ReviewDocument }> {
-  const { runner, prompt } = capturingRunner();
+  resumeSessionId?: string,
+): Promise<{ prompt: string; document: ReviewDocument; request: AgentRunRequest<unknown> }> {
+  const { runner, prompt, request } = capturingRunner();
   const { document } = await runReviewAgent({
     runner,
     projectContext: { kind: 'PROJECT', principles: [], invariants: [], runtimeManifest: null, knowledgeSummary: null },
@@ -79,8 +96,9 @@ async function promptFor(
     // test does not depend on the installation's own prompts.
     installRoot: '/nonexistent-install-root',
     ...(previousReview ? { previousReview } : {}),
+    ...(resumeSessionId ? { resumeSessionId } : {}),
   });
-  return { prompt: prompt(), document };
+  return { prompt: prompt(), document, request: request() };
 }
 
 test('the review prompt carries the digest and a pointer, not the whole findings', async () => {
@@ -129,4 +147,72 @@ test('a regeneration keeps the same prefix, which is the part a cache can reuse'
     again.slice(shared.length).includes('Previous review'),
     'the only thing a regeneration adds is the previous review, and it goes last',
   );
+});
+
+test('a first review is still asked for the whole document', async () => {
+  const { request } = await promptFor();
+  assert.ok(
+    request.resultInstruction.includes('Every key must be'),
+    'the first review must still be asked for every section',
+  );
+});
+
+test('a regeneration is asked for the sections it changed, and told the rest are left alone', async () => {
+  const { document } = await promptFor();
+  const { request } = await promptFor({ document, notes: [] });
+
+  const instruction = request.resultInstruction;
+  assert.ok(
+    instruction.includes('only if you are changing that section'),
+    'the agent must be told to include only what it changed',
+  );
+  assert.ok(
+    instruction.includes('keeps the previous version') && instruction.includes('leave out'),
+    'the agent must be told that an omitted key leaves that section alone',
+  );
+  assert.equal(
+    instruction.includes('Every key must be'),
+    false,
+    'a regeneration must not be asked for all twenty two sections',
+  );
+});
+
+test('a regeneration is told to emit every section its answer invalidates', async () => {
+  const { document } = await promptFor();
+  const { prompt } = await promptFor({ document, notes: [] });
+  assert.ok(prompt.includes('not only the section the note is anchored to'));
+});
+
+test('a patch leaves the sections it does not name exactly as they were', async () => {
+  const { document } = await promptFor();
+  const previous = structuredClone(document);
+  previous.sections.find((section) => section.key === 'risks')!.body = 'the original risks';
+
+  const { runner, request } = capturingRunner();
+  await runReviewAgent({
+    runner,
+    projectContext: { kind: 'PROJECT', principles: [], invariants: [], runtimeManifest: null, knowledgeSummary: null },
+    story: STORY,
+    revision: REVISION,
+    task: TASK,
+    findings: FINDINGS,
+    findingsPath: FINDINGS_PATH,
+    installRoot: '/nonexistent-install-root',
+    previousReview: { document: previous, notes: [] },
+  });
+
+  // What the runner does with a patch is what decides the document a human then
+  // approves, so it is asserted through the validate callback the agent passed.
+  const merged = request().validate({ sections: { recommended_approach: 'a new approach' } }) as ReviewDocument;
+  assert.equal(merged.sections.find((section) => section.key === 'recommended_approach')?.body, 'a new approach');
+  assert.equal(merged.sections.find((section) => section.key === 'risks')?.body, 'the original risks');
+  assert.equal(merged.summary, previous.summary);
+});
+
+test('the review resumes the research session when it is given one, and never invents one', async () => {
+  const { request: resumed } = await promptFor(undefined, 'session-from-research');
+  assert.equal(resumed.resumeSessionId, 'session-from-research');
+
+  const { request: cold } = await promptFor();
+  assert.equal(cold.resumeSessionId, undefined, 'a review with no session must open a cold one');
 });

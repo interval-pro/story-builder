@@ -7,3 +7,4 @@ export * from './job-types';
 export * from './entities';
 export * from './impact';
 export * from './task-size';
+export * from './run-resume';

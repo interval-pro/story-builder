@@ -5,7 +5,12 @@ import { readModelUsage, readSubagentStats } from './usage';
 
 const logger = createLogger('claude-cli');
 
-function buildArgs(options: ClaudeCliOptions, format: 'json' | 'stream-json'): string[] {
+/**
+ * The exact argument list a pass is spawned with. Exported so the flags can be
+ * asserted without spawning anything: which session flag wins, whether both
+ * passes carry an effort, and one --add-dir per directory.
+ */
+export function buildArgs(options: ClaudeCliOptions, format: 'json' | 'stream-json'): string[] {
   const args = ['--print', '--output-format', format];
   if (format === 'stream-json') args.push('--verbose');
   if (options.appendSystemPrompt) args.push('--append-system-prompt', options.appendSystemPrompt);
@@ -152,7 +157,18 @@ export function runClaudeCli(options: ClaudeCliOptions): Promise<ClaudeResult> {
 
       const result = toResult(finalRaw, toolUses, transcript.join('\n\n'));
       if (result.isError) {
-        reject(new AppError('claude_cli_error', `The Claude CLI reported an error: ${result.text.slice(0, 2000)}`, 502));
+        // The run still spent what it spent, and it still has a session. Both
+        // are already in hand here, and throwing them away is what made a failed
+        // run look free and made the next attempt start from nothing.
+        reject(
+          new AppError('claude_cli_error', `The Claude CLI reported an error: ${result.text.slice(0, 2000)}`, 502, {
+            sessionId: result.sessionId,
+            usage: result.usage,
+            costUsd: result.costUsd,
+            modelUsage: result.modelUsage,
+            subagentStats: result.subagentStats,
+          }),
+        );
         return;
       }
       resolve(result);

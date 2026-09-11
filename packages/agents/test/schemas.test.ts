@@ -6,7 +6,9 @@ import {
   validateQaReport,
   validateResearchFindings,
   validateReviewDocument,
+  validateReviewPatch,
 } from '../src/schemas.ts';
+import { REVIEW_SECTIONS } from '@ai-engine/domain';
 
 test('a review document keeps only the known sections', () => {
   const document = validateReviewDocument({
@@ -29,6 +31,47 @@ test('a section given as an array is flattened rather than lost', () => {
   const risks = document.sections.find((section) => section.key === 'risks')?.body ?? '';
   assert.ok(risks.includes('first risk'));
   assert.ok(risks.includes('second risk'));
+});
+
+test('a patch keeps only the sections it names, and only the known ones', () => {
+  const patch = validateReviewPatch({
+    sections: { risks: 'a new risk', invented_section: 'ignored' },
+  });
+
+  assert.deepEqual(Object.keys(patch.sections ?? {}), ['risks']);
+  assert.equal(patch.sections?.risks, 'a new risk');
+  // The absent keys must not appear at all: an empty body here would erase the
+  // section on merge rather than leave it alone.
+  assert.equal(patch.summary, undefined);
+  assert.equal(patch.implementationSteps, undefined);
+});
+
+test('a patched section given as an array is flattened rather than lost', () => {
+  const patch = validateReviewPatch({ sections: { risks: ['first risk', 'second risk'] } });
+  assert.ok(patch.sections?.risks?.includes('first risk'));
+  assert.ok(patch.sections?.risks?.includes('second risk'));
+});
+
+test('a patch that names nothing fails the run rather than changing nothing quietly', () => {
+  assert.throws(() => validateReviewPatch({}), /changed nothing/);
+  assert.throws(() => validateReviewPatch({ sections: {} }), /changed nothing/);
+  assert.throws(() => validateReviewPatch({ sections: { invented_section: 'x' } }), /changed nothing/);
+});
+
+test('a patch may carry every section, which is a full rewrite', () => {
+  const sections = Object.fromEntries(REVIEW_SECTIONS.map((key) => [key, `body of ${key}`]));
+  const patch = validateReviewPatch({ summary: 'rewritten', sections });
+
+  assert.equal(Object.keys(patch.sections ?? {}).length, REVIEW_SECTIONS.length);
+  assert.equal(patch.summary, 'rewritten');
+  for (const key of REVIEW_SECTIONS) {
+    assert.equal(patch.sections?.[key], `body of ${key}`);
+  }
+});
+
+test('a patch can set a section to the empty string', () => {
+  const patch = validateReviewPatch({ sections: { risks: '' } });
+  assert.equal(patch.sections?.risks, '');
 });
 
 test('an unknown QA verdict is treated as a rejection', () => {

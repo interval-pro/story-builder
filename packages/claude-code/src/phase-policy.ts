@@ -41,6 +41,11 @@ export type PhasePolicy = Pick<
 export interface PolicyOptions {
   /** Defaults to false. Set from AGENT_ALLOW_SUBAGENTS, never read here. */
   allowSubagents?: boolean;
+  /**
+   * The effort the answer pass runs at. Only answerPassPolicy reads it: a work
+   * pass gets its effort from its phase, optionally overridden by size.
+   */
+  effort?: PhasePolicy['effort'];
 }
 
 /** The denials every pass of every phase carries, on top of its own. */
@@ -97,12 +102,19 @@ const ANSWER_PASS_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Read',
  * The pass that asks for the structured answer. It is the same boundary as a
  * phase policy, so it is built here rather than a second time at the call site:
  * a denial added in one place has to reach both or the hole is invisible.
+ *
+ * It carries the effort its work pass ran at. This pass resumes that same
+ * session, and changing the effort inside a session rebuilds the prompt cache
+ * from scratch. Before this took an effort that happened on every run of every
+ * phase, because the work pass set the flag and this one left it off. Passing it
+ * through lowers no phase's effort; it only stops the two halves disagreeing.
  */
 export function answerPassPolicy(options: PolicyOptions = {}): PhasePolicy {
   return {
     restricted: true,
     permissionMode: 'dontAsk',
     disallowedTools: [...ANSWER_PASS_TOOLS, ...overheadTools(options)],
+    ...(options.effort ? { effort: options.effort } : {}),
   };
 }
 

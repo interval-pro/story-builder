@@ -76,6 +76,7 @@ interface AgentSpend {
   cacheReadTokens: number;
   cacheCreationTokens: number;
   unrecordedRuns: number;
+  failedRuns: number;
 }
 
 interface Spend {
@@ -240,10 +241,17 @@ export default function SystemPage() {
                 <div key={agent.agentType} className="card-detail">
                   {agent.agentType}: {agent.unrecordedRuns === agent.runs ? 'not recorded' : formatUsd(agent.costUsd)} over{' '}
                   {agent.runs} run(s)
+                  {agent.failedRuns > 0 ? `, ${agent.failedRuns} of them failed` : ''}
                 </div>
               ))}
               {spend.total.unrecordedRuns > 0 ? (
                 <div className="card-detail">{spend.total.unrecordedRuns} run(s) recorded no cost, so this total is partial.</div>
+              ) : null}
+              {spend.total.failedRuns > 0 ? (
+                <div className="card-detail">
+                  {spend.total.failedRuns} run(s) failed and are counted here. A run that burned tokens before it failed
+                  still cost what it cost.
+                </div>
               ) : null}
               <div className="card-detail">
                 Cost per run is measured: it is the figure the engine itself reports. This total is derived by summing

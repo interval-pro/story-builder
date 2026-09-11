@@ -134,6 +134,11 @@ export function registerSystemRoutes(router: HttpRouter, context: ApiContext): v
    * total is derived: it is our sum of those measured costs over a range we
    * chose. The payload carries no rate-limit field of any kind, so nothing here
    * reports the account's own limit.
+   *
+   * Runs that failed are counted here alongside the ones that finished, and are
+   * reported separately as failedRuns. A run that burned tokens and then failed
+   * is spend; leaving it out made this figure lower than the bill. Any number
+   * saved from before that change will not line up with one taken after it.
    */
   router.get('/api/system/spend', async ({ query }) => {
     const projectId = await primaryProjectId(context, query.get('projectId'));
@@ -151,8 +156,18 @@ export function registerSystemRoutes(router: HttpRouter, context: ApiContext): v
         cacheReadTokens: sum.cacheReadTokens + agent.cacheReadTokens,
         cacheCreationTokens: sum.cacheCreationTokens + agent.cacheCreationTokens,
         unrecordedRuns: sum.unrecordedRuns + agent.unrecordedRuns,
+        failedRuns: sum.failedRuns + agent.failedRuns,
       }),
-      { runs: 0, costUsd: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, unrecordedRuns: 0 },
+      {
+        runs: 0,
+        costUsd: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        unrecordedRuns: 0,
+        failedRuns: 0,
+      },
     );
 
     return {

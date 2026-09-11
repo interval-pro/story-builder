@@ -22,6 +22,13 @@ export interface AgentRunRequest<T> {
   maxIterations?: number;
   /** Continues an earlier conversation. The fix loop uses this. */
   resumeSessionId?: string;
+  /**
+   * Fired with the session the engine is about to use, before it spawns
+   * anything. A run that then times out or is killed has still said which
+   * conversation it was in, which is what lets the next attempt continue it
+   * rather than start again. Engines without sessions never call it.
+   */
+  onSessionStart?: (sessionId: string) => void | Promise<void>;
   onStep?: (step: AgentStep) => void | Promise<void>;
 }
 
@@ -38,6 +45,16 @@ export interface AgentRunOutcome<T> {
   usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number };
   /** Set by engines that keep a resumable conversation. */
   sessionId: string | null;
+  /**
+   * Whether this run continued an earlier conversation rather than opening a
+   * cold one. Null from an engine that has no sessions to resume, which is not
+   * the same statement as a deliberate cold start.
+   */
+  resumed: boolean | null;
+  /** The reasoning effort the engine was given, null when it chose its own. */
+  effort: string | null;
+  /** The model the engine ran, null when its own default was used. */
+  model: string | null;
   costUsd: number | null;
   /** Per-model token counts when the engine reports them, otherwise null. */
   modelUsage: Record<string, unknown> | null;
@@ -92,7 +109,12 @@ export class BuiltinAgentRunner implements AgentRunner {
       transcript: conversationTranscript(loop.messages),
       toolCallCount: loop.toolCallCount,
       usage: loop.usage,
+      // This engine keeps no session, so there is nothing to resume and nothing
+      // to report: null here is "never recorded", not "started cold".
       sessionId: null,
+      resumed: null,
+      effort: null,
+      model: null,
       // The provider reports neither a cost nor a per-model breakdown, and this
       // engine has no delegation tool to report on.
       costUsd: null,

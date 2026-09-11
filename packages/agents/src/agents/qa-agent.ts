@@ -17,6 +17,13 @@ export interface QaAgentInput {
   iteration: number;
   installRoot: string;
   maxIterations?: number;
+  /**
+   * Continues the session of a QA attempt that failed while it still can be.
+   * This never carries the implementation's session: QA opens a fresh one on
+   * purpose so it cannot see the reasoning behind the code it is judging.
+   */
+  resumeSessionId?: string;
+  onSessionStart?: (sessionId: string) => Promise<void> | void;
   onStep?: (step: AgentStep) => Promise<void> | void;
 }
 
@@ -88,6 +95,8 @@ export async function runQaAgent(
     prompt: user,
     maxIterations: input.maxIterations ?? 30,
     ...(input.onStep ? { onStep: input.onStep } : {}),
+    ...(input.onSessionStart ? { onSessionStart: input.onSessionStart } : {}),
+    ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
     resultInstruction: RESULT_INSTRUCTION,
     validate: validateQaReport,
   });
