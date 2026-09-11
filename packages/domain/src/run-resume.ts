@@ -26,16 +26,16 @@ export const RESUMABLE_WINDOW_MS = 60 * 60 * 1000;
 const TIMEOUT_MARKER = 'did not finish within';
 
 /** What the heuristic needs off a run. Kept narrow so a test can build one. */
-export type ResumeCandidate = Pick<TaskRun, 'status' | 'sessionId' | 'finishedAt' | 'errorMessage'>;
+export type ResumeCandidate = Pick<TaskRun, 'status' | 'sessionId' | 'finishedAt' | 'errorMessage' | 'resumed'>;
 
 /**
  * Whether a retry should continue this run's session instead of starting cold.
  *
  * The attempt itself is the real test of whether a session can still be read
  * back; this is only the cheap pre-filter that stops us paying for that attempt
- * on a run that failed last week. The two errors cost very differently — a
- * wasted resume is one fast rejection, while a needless cold start is the whole
- * re-read — so anything uncertain resolves towards attempting it, except the
+ * on a run that failed last week. The two errors cost very differently: a wasted
+ * resume is one fast rejection, while a needless cold start is the whole
+ * re-read, so anything uncertain resolves towards attempting it, except the
  * cases below where there is nothing to attempt.
  */
 export function shouldResumeFailedRun(run: ResumeCandidate | null, now: Date): boolean {
@@ -43,6 +43,14 @@ export function shouldResumeFailedRun(run: ResumeCandidate | null, now: Date): b
   if (run.status !== 'FAILED') return false;
   if (!run.sessionId) return false;
   if (run.errorMessage?.includes(TIMEOUT_MARKER)) return false;
+
+  // A run that already was a resume and failed anyway has answered the only
+  // question this function asks: that session could not be continued. Its id is
+  // still on the row, so without this the next attempt would resume the same
+  // dead session, and the one after that, until the job runs out of attempts.
+  // One resume is spent per phase, and the attempt after it starts cold, which
+  // is the fallback the whole heuristic depends on.
+  if (run.resumed === true) return false;
 
   // failStaleRuns cannot leave a FAILED run without a finish time, but a crash
   // mid-write could. An unreadable timestamp is treated as outside the window:

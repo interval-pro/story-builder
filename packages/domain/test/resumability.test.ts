@@ -33,6 +33,7 @@ function failedRun(overrides: Partial<ResumeCandidate> = {}): ResumeCandidate {
     sessionId: 'session-1',
     finishedAt: new Date(NOW.getTime() - 60_000).toISOString(),
     errorMessage: 'The Claude CLI reported an error',
+    resumed: false,
     ...overrides,
   };
 }
@@ -68,4 +69,30 @@ test('a run with no usable finish time is treated as outside the window', () => 
 test('a timed-out run is not resumed: that session already spent its whole budget', () => {
   const timedOut = failedRun({ errorMessage: 'The Claude CLI did not finish within 3600000ms' });
   assert.equal(shouldResumeFailedRun(timedOut, NOW), false);
+});
+
+/**
+ * The fallback the whole heuristic rests on is that a failed resume is followed
+ * by a cold start. A resumed run keeps its session id on the row, so without
+ * this the retry would resume the same dead session until the job ran out of
+ * attempts, turning a failure that used to recover into a terminal one.
+ */
+test('a run that already resumed and failed anyway is not resumed a second time', () => {
+  assert.equal(shouldResumeFailedRun(failedRun({ resumed: true }), NOW), false);
+});
+
+test('at most one resume is spent per phase, and the attempt after it starts cold', () => {
+  // First failure: cold run, so the retry continues its session.
+  const cold = failedRun({ resumed: false });
+  assert.equal(shouldResumeFailedRun(cold, NOW), true);
+
+  // That resumed attempt fails too. The next retry must not try the same id.
+  const afterResume = failedRun({ resumed: true, sessionId: cold.sessionId });
+  assert.equal(shouldResumeFailedRun(afterResume, NOW), false);
+});
+
+test('a run whose resumed flag was never recorded is still a candidate', () => {
+  // NULL is what an engine with no sessions leaves behind. It never reaches here
+  // with a session id, but null must not read as "this one already resumed".
+  assert.equal(shouldResumeFailedRun(failedRun({ resumed: null }), NOW), true);
 });

@@ -89,6 +89,34 @@ export async function handleResearch(context: JobContext): Promise<void> {
     }
   }
 
+  const { findings, sessionId } = await runResearchPhase(context, projectContext);
+
+  // The review runs next, in this job, over the same worktree the research just
+  // finished reading. Handing it that session is what stops it paying to read
+  // the repository a second time.
+  //
+  // It is called out here rather than inside the research run's own try: the
+  // review has its own run row and fails it itself, so a review failure that
+  // reached the research catch would mark a run that had already completed as
+  // failed, and overwrite its tokens, cost and session with the review's.
+  await generateReview(context, {
+    projectContext,
+    findings,
+    previousReview: null,
+    researchSessionId: sessionId,
+  });
+}
+
+/**
+ * The research run itself, and nothing that is not part of it.
+ *
+ * Everything in here belongs to one RESEARCH row, so its catch can fail that row
+ * knowing the error is its own. Returns what the review that follows needs.
+ */
+async function runResearchPhase(
+  context: JobContext,
+  projectContext: Awaited<ReturnType<typeof buildProjectContext>>,
+): Promise<{ findings: Awaited<ReturnType<typeof runResearchAgent>>['findings']; sessionId: string | null }> {
   const researchPrompt = await loadAgentPrompt('research', context.installRoot);
   const researchVersionId = await resolveAgentVersion(context, 'research', researchPrompt);
 
@@ -155,15 +183,7 @@ export async function handleResearch(context: JobContext): Promise<void> {
       payload: { files: findings.relevantFiles.length, openQuestions: findings.openQuestions.length },
     });
 
-    // The review runs next, in this job, over the same worktree the research
-    // just finished reading. Handing it that session is what stops it paying to
-    // read the repository a second time.
-    await generateReview(context, {
-      projectContext,
-      findings,
-      previousReview: null,
-      researchSessionId: outcome.sessionId,
-    });
+    return { findings, sessionId: outcome.sessionId };
   } catch (error) {
     await failRun(context, researchRun.id, error);
     throw error;
