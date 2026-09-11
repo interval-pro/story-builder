@@ -136,10 +136,10 @@ export default function TaskPage() {
     }
   }
 
-  async function act(path: string) {
+  async function act(path: string, body: Record<string, unknown> = {}) {
     setBusy(true);
     try {
-      await api.post(`/api/tasks/${taskId}/${path}`, {});
+      await api.post(`/api/tasks/${taskId}/${path}`, body);
       await load();
     } catch (actError) {
       setError(actError instanceof Error ? actError.message : String(actError));
@@ -180,9 +180,19 @@ export default function TaskPage() {
         <div className="card warning">
           <div className="card-value">Blocked</div>
           <p>{task.blockedReason}</p>
+          <p className="card-detail">
+            Nothing moves until you choose where this goes back to. The fix cycle keeps the branch and the QA findings
+            it was rejected on.
+          </p>
           <div className="actions">
-            <button className="secondary" disabled={busy} onClick={() => void act('unblock')}>
-              Send back to implementation
+            <button disabled={busy} onClick={() => void act('unblock', { target: 'FIX_REQUIRED' })}>
+              Back to the fix cycle
+            </button>
+            <button className="secondary" disabled={busy} onClick={() => void act('unblock', { target: 'IMPLEMENTATION_QUEUED' })}>
+              Back to implementation
+            </button>
+            <button className="secondary" disabled={busy} onClick={() => void act('unblock', { target: 'ANALYSIS_QUEUED' })}>
+              Back to research
             </button>
           </div>
         </div>
