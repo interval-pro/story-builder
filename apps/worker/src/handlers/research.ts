@@ -1,3 +1,4 @@
+import { loadConfig } from '@ai-engine/shared';
 import { renderReviewMarkdown } from '@ai-engine/domain';
 import {
   loadAgentPrompt,
@@ -152,10 +153,20 @@ export async function handleResearch(context: JobContext): Promise<void> {
 
 /**
  * Where the review agent can read the full findings. A regeneration resolves the
- * same file the first review was pointed at. Null when no such artifact exists,
- * which makes the caller inline the findings rather than point at nothing.
+ * same file the first review was pointed at. Null when the findings have to be
+ * inlined instead, which is either because no such artifact exists or because
+ * the engine cannot reach one.
+ *
+ * Only the CLI engine can be handed a directory outside the worktree. The
+ * built-in engine acts through the tool registry, whose read tools resolve every
+ * path against the worktree and refuse anything outside it, and the artifact
+ * store is a sibling of the workspaces root. Pointing that engine at the file
+ * would deny the read on every review and quietly cost it the symbols, the
+ * execution paths and the database, test, dependency and external notes.
  */
 async function findingsArtifactPath(context: JobContext): Promise<string | null> {
+  if (loadConfig().agents.engine !== 'claude-code') return null;
+
   const record = await context.repos.artifacts.latestByKind(context.task.id, 'research_findings');
   if (!record) {
     context.logger.warn('no research findings artifact to point the review at, sending them inline instead');
@@ -210,6 +221,8 @@ export async function generateReview(
 
     // The findings are already an artifact, so the prompt points at them instead
     // of carrying tens of kilobytes inline on every run and every regeneration.
+    // The pointer and the directory that makes it readable come from one value,
+    // so an agent is never told to read a file it would be refused.
     const findingsPath = await findingsArtifactPath(context);
     const runner = await createAgentRunner({
       context,
