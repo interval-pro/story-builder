@@ -14,8 +14,11 @@ import { KnowledgeService } from '@ai-engine/project-knowledge';
 import {
   buildProjectContext,
   createAgentRunner,
+  failRun,
   recordEngineMetrics,
+  recordSessionStart,
   resolveAgentVersion,
+  resumableSessionFor,
   runCompletion,
   taskArtifactsPathFor,
   type JobContext,
@@ -86,13 +89,47 @@ export async function handleResearch(context: JobContext): Promise<void> {
     }
   }
 
+  const { findings, sessionId } = await runResearchPhase(context, projectContext);
+
+  // The review runs next, in this job, over the same worktree the research just
+  // finished reading. Handing it that session is what stops it paying to read
+  // the repository a second time.
+  //
+  // It is called out here rather than inside the research run's own try: the
+  // review has its own run row and fails it itself, so a review failure that
+  // reached the research catch would mark a run that had already completed as
+  // failed, and overwrite its tokens, cost and session with the review's.
+  await generateReview(context, {
+    projectContext,
+    findings,
+    previousReview: null,
+    researchSessionId: sessionId,
+  });
+}
+
+/**
+ * The research run itself, and nothing that is not part of it.
+ *
+ * Everything in here belongs to one RESEARCH row, so its catch can fail that row
+ * knowing the error is its own. Returns what the review that follows needs.
+ */
+async function runResearchPhase(
+  context: JobContext,
+  projectContext: Awaited<ReturnType<typeof buildProjectContext>>,
+): Promise<{ findings: Awaited<ReturnType<typeof runResearchAgent>>['findings']; sessionId: string | null }> {
   const researchPrompt = await loadAgentPrompt('research', context.installRoot);
   const researchVersionId = await resolveAgentVersion(context, 'research', researchPrompt);
+
+  // Read before the new run is started, so it sees the attempt that failed and
+  // not the one about to begin.
+  const previousSessionId = await resumableSessionFor(context, 'RESEARCH');
   const researchRun = await context.repos.runs.start({
     taskId: context.task.id,
     phase: 'RESEARCH',
     agentType: 'research',
     agentVersionId: researchVersionId,
+    sessionId: previousSessionId,
+    ...(previousSessionId ? { resumed: true } : {}),
   });
 
   try {
@@ -105,6 +142,8 @@ export async function handleResearch(context: JobContext): Promise<void> {
       revision: context.revision,
       task: context.task,
       installRoot: context.installRoot,
+      onSessionStart: recordSessionStart(context, researchRun.id, Boolean(previousSessionId)),
+      ...(previousSessionId ? { resumeSessionId: previousSessionId } : {}),
     });
 
     await context.artifacts.put({
@@ -144,9 +183,9 @@ export async function handleResearch(context: JobContext): Promise<void> {
       payload: { files: findings.relevantFiles.length, openQuestions: findings.openQuestions.length },
     });
 
-    await generateReview(context, { projectContext, findings, previousReview: null });
+    return { findings, sessionId: outcome.sessionId };
   } catch (error) {
-    await context.repos.runs.fail(researchRun.id, error instanceof Error ? error.message : String(error));
+    await failRun(context, researchRun.id, error);
     throw error;
   }
 }
@@ -202,15 +241,32 @@ export async function generateReview(
     projectContext: Awaited<ReturnType<typeof buildProjectContext>>;
     findings: Awaited<ReturnType<typeof runResearchAgent>>['findings'];
     previousReview: Parameters<typeof runReviewAgent>[0]['previousReview'] | null;
+    /**
+     * The session the research just finished in, when the review follows it
+     * directly. Absent for a regeneration and for the findings-reuse branch,
+     * which is what makes a failed resume fall back to a cold review on the next
+     * attempt without any extra code.
+     */
+    researchSessionId?: string | null;
   },
 ): Promise<void> {
   const reviewPrompt = await loadAgentPrompt('review', context.installRoot);
   const reviewVersionId = await resolveAgentVersion(context, 'review', reviewPrompt);
+
+  // The research session first, then a review session left behind by an attempt
+  // that failed. A regeneration resumes neither: by then the human gate has been
+  // and gone, and re-sending a whole history costs more than the re-read saves.
+  const resumeSessionId = input.previousReview
+    ? null
+    : (input.researchSessionId ?? (await resumableSessionFor(context, 'REVIEW')));
+
   const reviewRun = await context.repos.runs.start({
     taskId: context.task.id,
     phase: 'REVIEW',
     agentType: 'review',
     agentVersionId: reviewVersionId,
+    sessionId: resumeSessionId,
+    ...(resumeSessionId ? { resumed: true } : {}),
   });
 
   try {
@@ -218,6 +274,13 @@ export async function generateReview(
       fileCount: input.findings.relevantFiles.length,
       riskSignalCount: input.findings.riskSignals.length,
     });
+    // Decided here, once, and held for the rest of the task: implementation and
+    // QA read it instead of each classifying the same change from the approved
+    // review, which is a second and third answer to a question already settled.
+    if (context.task.size !== size) {
+      await context.repos.tasks.update(context.task.id, { size });
+      context.task.size = size;
+    }
 
     // The findings are already an artifact, so the prompt points at them instead
     // of carrying tens of kilobytes inline on every run and every regeneration.
@@ -241,7 +304,9 @@ export async function generateReview(
       findings: input.findings,
       findingsPath,
       installRoot: context.installRoot,
+      onSessionStart: recordSessionStart(context, reviewRun.id, Boolean(resumeSessionId)),
       ...(input.previousReview ? { previousReview: input.previousReview } : {}),
+      ...(resumeSessionId ? { resumeSessionId } : {}),
     });
 
     if (problems.length > 0) {
@@ -289,7 +354,7 @@ export async function generateReview(
     });
     await context.orchestrator.checkpoint({ taskId: context.task.id, runId: reviewRun.id });
   } catch (error) {
-    await context.repos.runs.fail(reviewRun.id, error instanceof Error ? error.message : String(error));
+    await failRun(context, reviewRun.id, error);
     throw error;
   }
 }

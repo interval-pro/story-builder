@@ -3,6 +3,7 @@ import type { ConflictKind, ConflictSeverity, ImpactResourceKind } from './impac
 import type { JobStatus, JobType } from './job-types';
 import type { ReviewDocument } from './review';
 import type { RiskLevel } from './risk';
+import type { TaskSize } from './task-size';
 import type { TaskState } from './task-state';
 
 /**
@@ -54,6 +55,11 @@ export interface Task {
   baseCommit: string;
   knowledgeSnapshotId: string | null;
   riskLevel: RiskLevel | null;
+  /**
+   * How big this change is, classified once by the review and then held. Null on
+   * a task created before it was recorded, which makes the phase classify again.
+   */
+  size: TaskSize | null;
   qaIteration: number;
   baseMoved: boolean;
   blockedReason: string | null;
@@ -80,6 +86,18 @@ export interface TaskRun {
   /** Measured per-model usage as the engine reported it, shape unspecified. */
   modelUsage: Record<string, unknown> | null;
   subagentStats: Record<string, unknown> | null;
+  /** The session the engine ran in, written before the process spawns. */
+  sessionId: string | null;
+  /**
+   * Whether this run continued an earlier conversation. Null means never
+   * recorded, which is what an engine without sessions leaves behind; false is a
+   * deliberate cold start and true is a resume.
+   */
+  resumed: boolean | null;
+  /** The reasoning effort actually sent, so spend can be read against it. */
+  effort: string | null;
+  /** The model the engine ran, or null when its own default was used. */
+  model: string | null;
   errorMessage: string | null;
 }
 

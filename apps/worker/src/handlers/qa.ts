@@ -7,8 +7,11 @@ import {
   createAgentRunner,
   createExecutor,
   ensureDependencies,
+  failRun,
   recordEngineMetrics,
+  recordSessionStart,
   resolveAgentVersion,
+  resumableSessionFor,
   runCompletion,
   workspacePathFor,
   type JobContext,
@@ -98,11 +101,18 @@ export async function handleQa(context: JobContext): Promise<void> {
   const iteration = context.task.qaIteration + 1;
   const prompt = await loadAgentPrompt('qa', context.installRoot);
   const agentVersionId = await resolveAgentVersion(context, 'qa', prompt);
+  // QA never sees the implementation's session: it must judge the code without
+  // the reasoning behind it. The only session it will continue is one of its
+  // own, left behind by a QA attempt that failed a moment ago.
+  const previousSessionId = await resumableSessionFor(context, 'QA');
+
   const run = await context.repos.runs.start({
     taskId: context.task.id,
     phase: 'QA',
     agentType: 'qa',
     agentVersionId,
+    sessionId: previousSessionId,
+    ...(previousSessionId ? { resumed: true } : {}),
   });
 
   try {
@@ -110,11 +120,14 @@ export async function handleQa(context: JobContext): Promise<void> {
     const git = new GitClient(workspacePathFor(context.task.id));
     const diff = await fullDiff(git, context.task.baseCommit);
 
-    // QA gets a fresh session on purpose: it must not see the implementation's reasoning.
-    const size = classifyTaskSize({
-      fileCount: approved.document.expectedFiles.length,
-      riskSignalCount: approved.document.riskSignals.length,
-    });
+    // Classified once by the review and held since; a task from before that was
+    // recorded has none, so it is worked out here instead.
+    const size =
+      context.task.size ??
+      classifyTaskSize({
+        fileCount: approved.document.expectedFiles.length,
+        riskSignalCount: approved.document.riskSignals.length,
+      });
     const runner = await createAgentRunner({ context, runId: run.id, phase: 'QA', allowWeb: false, size });
 
     const { report, outcome } = await runQaAgent({
@@ -128,6 +141,8 @@ export async function handleQa(context: JobContext): Promise<void> {
       testResults,
       iteration,
       installRoot: context.installRoot,
+      onSessionStart: recordSessionStart(context, run.id, Boolean(previousSessionId)),
+      ...(previousSessionId ? { resumeSessionId: previousSessionId } : {}),
     });
 
     const testsFailed = testResults.some((result) => result.exitCode !== 0);
@@ -236,7 +251,7 @@ export async function handleQa(context: JobContext): Promise<void> {
       enqueue: { jobType: 'FIX', payload: { iteration } },
     });
   } catch (error) {
-    await context.repos.runs.fail(run.id, error instanceof Error ? error.message : String(error));
+    await failRun(context, run.id, error);
     throw error;
   }
 }

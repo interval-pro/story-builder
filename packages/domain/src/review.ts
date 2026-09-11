@@ -153,6 +153,65 @@ export function renderReviewMarkdown(document: ReviewDocument): string {
   return parts.join('\n');
 }
 
+/**
+ * The parts of a review a regeneration actually changed.
+ *
+ * Answering one note does not change twenty two sections, so a regeneration is
+ * asked for the ones it is changing rather than for the whole document. Every
+ * field is optional and absence means "leave it alone", which is what lets an
+ * untouched section carry across byte for byte instead of being rewritten into
+ * something equivalent.
+ */
+export interface ReviewPatch {
+  summary?: string;
+  sections?: Partial<Record<ReviewSectionKey, string>>;
+  implementationSteps?: ImplementationStep[];
+  expectedFiles?: string[];
+  expectedSymbols?: string[];
+  riskSignals?: { indicator: string; evidence: string }[];
+  openQuestions?: string[];
+}
+
+/**
+ * Applies a regeneration's patch onto the version it was written against.
+ *
+ * Presence is the whole signal: a section the patch names replaces that body
+ * entirely, including with an empty string, so a note can still demand a full
+ * rewrite or ask for a section to be emptied. A section the patch does not name
+ * keeps the previous body unchanged, character for character, which is what
+ * makes the version diff honest — a section nobody touched stops reporting
+ * itself as changed.
+ *
+ * This is the exact inverse of diffReviewDocuments, and lives beside it for that
+ * reason: if the two ever disagree the only place it shows is a badge in the
+ * cockpit claiming a section moved when it did not.
+ */
+export function mergeReviewDocument(previous: ReviewDocument, patch: ReviewPatch): ReviewDocument {
+  const patched = patch.sections ?? {};
+  const previousBodies = new Map(previous.sections.map((section) => [section.key, section.body]));
+
+  // Sections the previous version carried, plus any the patch introduces. A key
+  // neither of them mentions is not invented here.
+  const keys = REVIEW_SECTIONS.filter((key) => previousBodies.has(key) || patched[key] !== undefined);
+
+  return {
+    summary: patch.summary ?? previous.summary,
+    sections: keys.map((key) => {
+      const body = patched[key];
+      return {
+        key,
+        title: REVIEW_SECTION_TITLES[key],
+        body: body !== undefined ? body : (previousBodies.get(key) ?? ''),
+      };
+    }),
+    implementationSteps: patch.implementationSteps ?? previous.implementationSteps,
+    expectedFiles: patch.expectedFiles ?? previous.expectedFiles,
+    expectedSymbols: patch.expectedSymbols ?? previous.expectedSymbols,
+    riskSignals: patch.riskSignals ?? previous.riskSignals,
+    openQuestions: patch.openQuestions ?? previous.openQuestions,
+  };
+}
+
 export interface ReviewSectionDiff {
   key: ReviewSectionKey;
   title: string;

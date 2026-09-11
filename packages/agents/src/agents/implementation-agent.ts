@@ -20,6 +20,7 @@ export interface ImplementationAgentInput {
   maxIterations?: number;
   /** Continues the earlier implementation session during a fix cycle. */
   resumeSessionId?: string;
+  onSessionStart?: (sessionId: string) => Promise<void> | void;
   onStep?: (step: AgentStep) => Promise<void> | void;
 }
 
@@ -115,6 +116,7 @@ export async function runImplementationAgent(
     maxIterations: input.maxIterations ?? 60,
     ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
     ...(input.onStep ? { onStep: input.onStep } : {}),
+    ...(input.onSessionStart ? { onSessionStart: input.onSessionStart } : {}),
     resultInstruction: RESULT_INSTRUCTION,
     validate: validateImplementationOutcome,
   });

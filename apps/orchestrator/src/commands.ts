@@ -1,6 +1,7 @@
 import { AppError, createLogger, newId, slugify } from '@ai-engine/shared';
 import {
   classifyRisk,
+  classifyTaskSize,
   requiresSecondApproval,
   type ProjectKind,
   type RiskSignal,
@@ -216,12 +217,21 @@ export class TaskCommands {
     })) as RiskSignal[];
     const risk = classifyRisk(signals);
 
+    // Sized from the document the human just approved, the same document and the
+    // same moment the risk level comes from. The review classified itself from
+    // the research findings because that is all it had; implementation and QA
+    // have always worked from the approved plan, so this is the number they get.
+    const size = classifyTaskSize({
+      fileCount: version.document.expectedFiles.length,
+      riskSignalCount: version.document.riskSignals.length,
+    });
+
     const approved = await this.orchestrator.transition({
       taskId: task.id,
       to: 'REVIEW_APPROVED',
       actor: input.actor,
-      payload: { reviewVersionId: version.id, riskLevel: risk.level },
-      patch: { riskLevel: risk.level },
+      payload: { reviewVersionId: version.id, riskLevel: risk.level, size },
+      patch: { riskLevel: risk.level, size },
     });
 
     if (requiresSecondApproval(risk.level)) {

@@ -4,7 +4,7 @@ import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
 
 const COLUMNS = `id, project_id, story_id, story_revision_id, state, previous_state, branch_name,
-  base_branch, base_commit, knowledge_snapshot_id, risk_level, qa_iteration, base_moved,
+  base_branch, base_commit, knowledge_snapshot_id, risk_level, size, qa_iteration, base_moved,
   blocked_reason, failure_reason, created_at, updated_at`;
 
 export class TaskRepository {
@@ -104,6 +104,7 @@ export class TaskRepository {
       Pick<
         Task,
         | 'riskLevel'
+        | 'size'
         | 'qaIteration'
         | 'baseMoved'
         | 'blockedReason'
@@ -114,6 +115,10 @@ export class TaskRepository {
       >
     >,
   ): Promise<Task> {
+    // size goes through COALESCE, not the unconditional style blocked_reason and
+    // failure_reason use: those are meant to be cleared by a patch that omits
+    // them, and a size that vanished on the next unrelated update would send
+    // every later phase back to classifying the change again.
     const row = await this.db.queryOne(
       `UPDATE tasks SET
          risk_level = COALESCE($2, risk_level),
@@ -124,6 +129,7 @@ export class TaskRepository {
          base_commit = COALESCE($7, base_commit),
          knowledge_snapshot_id = COALESCE($8, knowledge_snapshot_id),
          story_revision_id = COALESCE($9, story_revision_id),
+         size = COALESCE($10, size),
          updated_at = now()
        WHERE id = $1 RETURNING ${COLUMNS}`,
       [
@@ -136,6 +142,7 @@ export class TaskRepository {
         patch.baseCommit ?? null,
         patch.knowledgeSnapshotId ?? null,
         patch.storyRevisionId ?? null,
+        patch.size ?? null,
       ],
     );
     if (!row) throw new NotFoundError('Task', id);

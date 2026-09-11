@@ -20,6 +20,12 @@ interface Props {
       cacheReadTokens: number | null;
       cacheCreationTokens: number | null;
       costUsd: number | null;
+      sessionId: string | null;
+      // Null means never recorded, which is what an engine without sessions
+      // leaves behind. It is not the same as a deliberate cold start.
+      resumed: boolean | null;
+      effort: string | null;
+      model: string | null;
     }[];
     qaRuns: { id: string; iteration: number; verdict: string; findings: { id: string; severity: string; category: string; summary: string; detail: string; file: string | null }[] }[];
     testRuns: { id: string; command: string; exitCode: number; passed: boolean; createdAt: string }[];
@@ -51,6 +57,9 @@ interface AgentSpend {
   cacheReadTokens: number;
   cacheCreationTokens: number;
   unrecordedRuns: number;
+  failedRuns: number;
+  /** Runs that continued an earlier session rather than reading it all again. */
+  resumedRuns: number;
 }
 
 /**
@@ -60,6 +69,9 @@ interface AgentSpend {
  * incomplete sum is never presented as a complete one. Cache reads are kept
  * beside the input count rather than folded into it: they bill at a fraction of
  * the price, and one combined number would look plausible and be wrong.
+ *
+ * Failed runs are counted here too, and separately, because a run that spent
+ * thirty thousand tokens and then failed is exactly the spend worth seeing.
  */
 function summariseSpend(runs: Run[]): { byAgent: AgentSpend[]; total: AgentSpend; unrecorded: number } {
   const empty = (agentType: string): AgentSpend => ({
@@ -71,6 +83,8 @@ function summariseSpend(runs: Run[]): { byAgent: AgentSpend[]; total: AgentSpend
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
     unrecordedRuns: 0,
+    failedRuns: 0,
+    resumedRuns: 0,
   });
 
   const byAgent = new Map<string, AgentSpend>();
@@ -86,6 +100,8 @@ function summariseSpend(runs: Run[]): { byAgent: AgentSpend[]; total: AgentSpend
       bucket.cacheReadTokens += run.cacheReadTokens ?? 0;
       bucket.cacheCreationTokens += run.cacheCreationTokens ?? 0;
       if (run.costUsd === null) bucket.unrecordedRuns += 1;
+      if (run.status === 'FAILED') bucket.failedRuns += 1;
+      if (run.resumed === true) bucket.resumedRuns += 1;
     }
     byAgent.set(run.agentType, agent);
   }
@@ -215,6 +231,15 @@ export function ExecutionView({ taskId, detail, onAction }: Props) {
             {spend.unrecorded} of {detail.runs.length} run(s) recorded no cost, so this total is partial.
           </div>
         ) : null}
+        {spend.total.failedRuns > 0 ? (
+          <div className="card-detail">
+            {spend.total.failedRuns} of {detail.runs.length} run(s) failed, and what they spent is counted here.
+          </div>
+        ) : null}
+        <div className="card-detail">
+          {spend.total.resumedRuns} of {detail.runs.length} run(s) continued an earlier session instead of reading the
+          repository again.
+        </div>
 
         {spend.byAgent.length === 0 ? (
           <p className="empty">No run has reported what it spent yet.</p>
@@ -250,6 +275,8 @@ export function ExecutionView({ taskId, detail, onAction }: Props) {
                     {formatTokens(run.inputTokens ?? 0)} in · {formatTokens(run.outputTokens ?? 0)} out ·{' '}
                     {formatTokens(run.cacheReadTokens ?? 0)} cache read ·{' '}
                     {formatTokens(run.cacheCreationTokens ?? 0)} cache written
+                    {run.resumed === null ? '' : run.resumed ? ' · resumed' : ' · started cold'}
+                    {run.effort ? ` · ${run.effort} effort` : ''}
                   </td>
                 </tr>
               ))}

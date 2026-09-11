@@ -5,6 +5,7 @@ import {
   type ImplementationStep,
   type QaFinding,
   type ReviewDocument,
+  type ReviewPatch,
   type ReviewSectionKey,
 } from '@ai-engine/domain';
 
@@ -79,6 +80,29 @@ export function validateResearchFindings(value: unknown): ResearchFindings {
   };
 }
 
+function readImplementationSteps(value: unknown): ImplementationStep[] {
+  const raw = Array.isArray(value) ? (value as unknown[]) : [];
+  return raw.map((entry, index) => {
+    const item = asRecord(entry, 'Implementation step');
+    return {
+      order: Number(item['order'] ?? index + 1) || index + 1,
+      title: asString(item['title']),
+      detail: asString(item['detail']),
+      files: asStringArray(item['files']),
+    };
+  });
+}
+
+function readRiskSignals(value: unknown): { indicator: string; evidence: string }[] {
+  const raw = Array.isArray(value) ? (value as unknown[]) : [];
+  return raw
+    .map((entry) => {
+      const item = asRecord(entry, 'Risk signal');
+      return { indicator: asString(item['indicator']), evidence: asString(item['evidence']) };
+    })
+    .filter((entry) => entry.indicator.length > 0);
+}
+
 /**
  * The model returns sections as a flat object keyed by section id; anything it
  * invents outside the fixed section list is dropped.
@@ -92,31 +116,59 @@ export function validateReviewDocument(value: unknown): ReviewDocument {
     body: asString(sectionsRaw[key]).trim(),
   }));
 
-  const stepsRaw = Array.isArray(record['implementationSteps']) ? (record['implementationSteps'] as unknown[]) : [];
-  const implementationSteps: ImplementationStep[] = stepsRaw.map((entry, index) => {
-    const item = asRecord(entry, 'Implementation step');
-    return {
-      order: Number(item['order'] ?? index + 1) || index + 1,
-      title: asString(item['title']),
-      detail: asString(item['detail']),
-      files: asStringArray(item['files']),
-    };
-  });
-
-  const risksRaw = Array.isArray(record['riskSignals']) ? (record['riskSignals'] as unknown[]) : [];
-
   return {
     summary: asString(record['summary']).trim(),
     sections,
-    implementationSteps,
+    implementationSteps: readImplementationSteps(record['implementationSteps']),
     expectedFiles: asStringArray(record['expectedFiles']),
     expectedSymbols: asStringArray(record['expectedSymbols']),
-    riskSignals: risksRaw.map((entry) => {
-      const item = asRecord(entry, 'Risk signal');
-      return { indicator: asString(item['indicator']), evidence: asString(item['evidence']) };
-    }).filter((entry) => entry.indicator.length > 0),
+    riskSignals: readRiskSignals(record['riskSignals']),
     openQuestions: asStringArray(record['openQuestions']),
   };
+}
+
+/**
+ * What a regeneration returns: only the parts it is changing.
+ *
+ * This deliberately does not map over the fixed section list the way
+ * validateReviewDocument does. That map turns an absent key into an empty body,
+ * which is right for a document meant to be complete and catastrophic for a
+ * patch: every section the agent did not mention would be silently erased and
+ * the diff would report it as removed rather than as an error.
+ *
+ * A patch that names nothing at all throws. A regeneration that changed nothing
+ * while marking a human's note addressed is the expensive failure here, so the
+ * run fails, the notes stay open and the job retries.
+ */
+export function validateReviewPatch(value: unknown): ReviewPatch {
+  const record = asRecord(value, 'Review patch');
+  const sectionsRaw = asRecord(record['sections'] ?? {}, 'Review sections');
+
+  const sections: ReviewSectionMap = {};
+  for (const [key, body] of Object.entries(sectionsRaw)) {
+    if (!(REVIEW_SECTIONS as readonly string[]).includes(key)) continue;
+    sections[key as ReviewSectionKey] = asString(body).trim();
+  }
+
+  const patch: ReviewPatch = {};
+  if (Object.keys(sections).length > 0) patch.sections = sections;
+  if (record['summary'] !== undefined && record['summary'] !== null) {
+    patch.summary = asString(record['summary']).trim();
+  }
+  if (Array.isArray(record['implementationSteps'])) {
+    patch.implementationSteps = readImplementationSteps(record['implementationSteps']);
+  }
+  if (Array.isArray(record['expectedFiles'])) patch.expectedFiles = asStringArray(record['expectedFiles']);
+  if (Array.isArray(record['expectedSymbols'])) patch.expectedSymbols = asStringArray(record['expectedSymbols']);
+  if (Array.isArray(record['riskSignals'])) patch.riskSignals = readRiskSignals(record['riskSignals']);
+  if (Array.isArray(record['openQuestions'])) patch.openQuestions = asStringArray(record['openQuestions']);
+
+  if (Object.keys(patch).length === 0) {
+    throw new ValidationError(
+      'The regenerated review changed nothing: it named no section and no top-level field.',
+    );
+  }
+  return patch;
 }
 
 export interface QaReport {

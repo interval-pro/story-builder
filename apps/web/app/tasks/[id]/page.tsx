@@ -37,6 +37,11 @@ interface TaskDetail {
     cacheReadTokens: number | null;
     cacheCreationTokens: number | null;
     costUsd: number | null;
+    sessionId: string | null;
+    // Null here too: an engine with no sessions never recorded either answer.
+    resumed: boolean | null;
+    effort: string | null;
+    model: string | null;
   }[];
   qaRuns: { id: string; iteration: number; verdict: string; findings: { id: string; severity: string; category: string; summary: string; detail: string; file: string | null }[] }[];
   testRuns: { id: string; command: string; exitCode: number; passed: boolean; createdAt: string }[];

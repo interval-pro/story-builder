@@ -69,6 +69,10 @@ export class ClaudeCodeAgentRunner implements AgentRunner {
     const sessionId = request.resumeSessionId ?? newId();
     let iteration = 0;
 
+    // Before the process exists, not after it succeeds: a run that dies still
+    // leaves behind the session a retry can continue.
+    await request.onSessionStart?.(sessionId);
+
     const work = await runClaudeCli({
       cwd: this.options.workspacePath,
       prompt: request.prompt,
@@ -105,13 +109,15 @@ export class ClaudeCodeAgentRunner implements AgentRunner {
     }
 
     // Second pass: no tools, no edits, JSON only. It reads nothing, so it is
-    // given no additional directory either.
+    // given no additional directory either. It carries the work pass's own
+    // effort: changing the effort inside a session rebuilds the prompt cache
+    // from scratch, and this pass resumes the session the work pass just filled.
     const answer = await runClaudeCli({
       cwd: this.options.workspacePath,
       prompt: request.resultInstruction,
       timeoutMs: resultTimeoutFor(this.options),
       resumeSessionId: work.sessionId,
-      ...answerPassPolicy({ allowSubagents: this.options.allowSubagents ?? false }),
+      ...answerPassPolicy({ allowSubagents: this.options.allowSubagents ?? false, effort: policy.effort }),
       ...(this.options.model ? { model: this.options.model } : {}),
       ...(this.options.binary ? { binary: this.options.binary } : {}),
     });
@@ -124,6 +130,9 @@ export class ClaudeCodeAgentRunner implements AgentRunner {
       toolCallCount: work.toolUses.length,
       usage: spend.usage,
       sessionId: work.sessionId,
+      resumed: Boolean(request.resumeSessionId),
+      effort: policy.effort ?? null,
+      model: this.options.model ?? null,
       costUsd: spend.costUsd,
       modelUsage: spend.modelUsage,
       subagentStats: spend.subagentStats,

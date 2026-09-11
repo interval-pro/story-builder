@@ -12,6 +12,9 @@ export interface ResearchAgentInput {
   task: Task;
   installRoot: string;
   maxIterations?: number;
+  /** Continues the session of an attempt that failed while it still can be. */
+  resumeSessionId?: string;
+  onSessionStart?: (sessionId: string) => Promise<void> | void;
   onStep?: (step: AgentStep) => Promise<void> | void;
 }
 
@@ -60,6 +63,8 @@ export async function runResearchAgent(
     ].join('\n'),
     maxIterations: input.maxIterations ?? 40,
     ...(input.onStep ? { onStep: input.onStep } : {}),
+    ...(input.onSessionStart ? { onSessionStart: input.onSessionStart } : {}),
+    ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
     resultInstruction: RESULT_INSTRUCTION,
     validate: validateResearchFindings,
   });
