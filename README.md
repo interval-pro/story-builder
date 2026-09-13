@@ -55,13 +55,24 @@ chmod +x install.sh
 ./install.sh
 ```
 
-That clones the latest release into `~/.story-builder/story-builder`, builds it
-and starts Postgres. No repository is needed yet. Then start it:
+That clones the latest release into `~/story-builder`, builds it and starts
+Postgres. No repository is needed yet. Then start it:
 
 ```bash
-cd ~/.story-builder/story-builder
+cd ~/story-builder
 ./scripts/dev-up.sh
 ```
+
+If you cloned the repository yourself instead, that last command is the only one
+you need. On a first start it writes `~/.story-builder/env` with the defaults,
+starts its own Postgres on port 5433, installs and builds, runs the migrations
+and registers the installation. There is nothing in that file you have to decide;
+the GitHub token is set from the cockpit's Settings screen and kept in the
+database.
+
+The checkout holds code and nothing else. Everything machine-specific lives in
+`~/.story-builder`, and everything your projects accumulate lives in the
+database, so deleting the checkout and cloning it again loses nothing.
 
 Open http://localhost:3000, add a project by giving the path of a Git repository
 with at least one commit, and describe an idea. Adding a project reads it once to

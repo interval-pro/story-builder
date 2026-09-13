@@ -111,19 +111,8 @@ mkdir -p "$STATE_ROOT" "$STATE_ROOT/run" "$STATE_ROOT/snapshots" "$STATE_ROOT/tm
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "-> Writing $ENV_FILE"
-  PG_PORT="${PG_PORT:-5433}"
-  {
-    echo "INSTALL_ROOT=$INSTALL_DIR"
-    echo "STATE_ROOT=$STATE_ROOT"
-    echo "DATABASE_URL=postgres://ai_engine:ai_engine@localhost:$PG_PORT/ai_engine"
-    echo "PG_CONTAINER=${PG_CONTAINER:-ai-engine-postgres-$NAME}"
-    echo "PG_PORT=$PG_PORT"
-    echo "SANDBOX_DOCKER_ENABLED=false"
-    echo "AGENT_ENGINE=claude-code"
-    echo "AI_PROVIDER=mock"
-    echo "API_PORT=4000"
-    echo "LOG_LEVEL=info"
-  } > "$ENV_FILE"
+  . "$INSTALL_DIR/scripts/default-env.sh"
+  write_default_env "$ENV_FILE" "$INSTALL_DIR" "$STATE_ROOT" "${PG_CONTAINER:-ai-engine-postgres-$NAME}"
 fi
 
 set -a; . "$ENV_FILE"; set +a

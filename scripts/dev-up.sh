@@ -7,6 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 . "$ROOT/scripts/state-root.sh"
+. "$ROOT/scripts/default-env.sh"
 
 export INSTALL_ROOT="${INSTALL_ROOT:-$ROOT}"
 export STATE_ROOT="${STATE_ROOT:-$(state_root_for "$INSTALL_ROOT")}"
@@ -22,9 +23,12 @@ if [ ! -f "$ENV_FILE" ] && [ -f "$ROOT/.env.local" ]; then
   mv "$ROOT/.env.local" "$ENV_FILE"
 fi
 
+# A fresh clone has no env file, and there is nothing in one a person needs to
+# decide. Writing the defaults is what makes starting from a clone one command
+# rather than a page of instructions.
 if [ ! -f "$ENV_FILE" ]; then
-  echo "Missing $ENV_FILE. Run ./install.sh." >&2
-  exit 1
+  echo "-> Writing $ENV_FILE"
+  write_default_env "$ENV_FILE" "$INSTALL_ROOT" "$STATE_ROOT"
 fi
 
 set -a; . "$ENV_FILE"; set +a
@@ -77,6 +81,21 @@ fi
 
 echo "-> Migrations"
 node packages/db/dist/cli/migrate.js
+
+# The installation is a project too, which is what lets a story change the
+# system and what the System screen's rebuild reads. A fresh database does not
+# know about it yet. Asked of the database rather than remembered in a file, so
+# a database that was wiped is registered again and one that was not is left
+# alone.
+installed="$(docker exec "$PG_CONTAINER" psql -tA -U ai_engine -d ai_engine \
+  -c "SELECT 1 FROM projects WHERE kind = 'INSTALLATION' LIMIT 1" 2>/dev/null || true)"
+if [ "$installed" != "1" ]; then
+  echo "-> Registering the installation"
+  node apps/cli/dist/main.js init --install-root "$INSTALL_ROOT" > "$RUN_DIR/init.log" 2>&1 || {
+    echo "Registering the installation failed. See $RUN_DIR/init.log." >&2
+    exit 1
+  }
+fi
 
 start() {
   local name="$1"; shift

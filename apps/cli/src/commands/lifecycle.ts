@@ -49,7 +49,7 @@ export async function statusCommand(repoPath: string, options: { project?: strin
     ['Version state', VERSION_LABELS[version.state] ?? version.state],
     ['CLI version', SYSTEM_VERSION],
     ['AI provider', `${config.ai.provider} (${config.ai.model})`],
-    ['Sandboxing', config.sandbox.enabled ? 'docker' : 'host worktrees'],
+    ['Where stories run', 'in the project directory, one branch per story'],
   ]);
 
   const db = new Database();
