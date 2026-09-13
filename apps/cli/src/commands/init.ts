@@ -152,7 +152,7 @@ export async function initCommand(options: {
       ['Default branch', defaultBranch || '—'],
       ['Remote', remoteUrl ?? 'none (pull requests are disabled)'],
       ['AI provider', `${config.ai.provider} (${config.ai.model})`],
-      ['Sandboxing', config.sandbox.enabled ? `docker (${config.sandbox.image})` : 'host worktrees'],
+      ['Where stories run', 'in the project directory, one branch per story'],
       ['Web UI', 'http://localhost:3000'],
     ]);
     info('\nStart the system with: ./scripts/dev-up.sh\n');
