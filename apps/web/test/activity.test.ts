@@ -94,6 +94,13 @@ test('a task waiting for a person shows no activity, even with a job in the queu
   assert.equal(taskActivity('PAUSED', 'PENDING'), null);
 });
 
+test('a finished story shows no activity while its learning or merge job is in the queue', () => {
+  // Completing a story queues LEARNING for it, and merging queues MERGE_STORY or
+  // MERGE_RESOLVE; the Queue page and Work tab show those jobs, the badge does not.
+  assert.equal(taskActivity('COMPLETED', 'PENDING'), null);
+  assert.equal(taskActivity('COMPLETED', 'RUNNING'), null);
+});
+
 test('a task known to have no job is queued only when it is waiting on another story', () => {
   assert.equal(taskActivity('WAITING_FOR_TASK', null), 'queued');
   assert.equal(taskActivity('IMPLEMENTING', null), null);

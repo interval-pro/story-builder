@@ -29,6 +29,13 @@ const HUMAN_GATE_STATES = [
  */
 const INTERRUPTION_STATES = ['PAUSING', 'PAUSED', 'STOPPING', 'STOPPED', 'FAILED', 'ROLLING_BACK', 'ROLLED_BACK'];
 
+/**
+ * Done. Completing a story queues LEARNING for it, and merging it queues MERGE_STORY
+ * or MERGE_RESOLVE, but the story itself is finished: those jobs show on the Queue
+ * page and the Work tab, not as activity on the story.
+ */
+const DONE_STATES = ['COMPLETED'];
+
 /** States that only ever mean the task is in the queue. */
 const QUEUED_STATES = ['ANALYSIS_QUEUED', 'IMPLEMENTATION_QUEUED', 'QA_QUEUED', 'WAITING_FOR_TASK'];
 
@@ -97,7 +104,9 @@ export function jobStatusesByTask(
  * which case the state name is the best evidence left.
  */
 export function taskActivity(state: string, jobStatus: string | null | undefined): Activity {
-  if (HUMAN_GATE_STATES.includes(state) || INTERRUPTION_STATES.includes(state)) return null;
+  if (HUMAN_GATE_STATES.includes(state) || INTERRUPTION_STATES.includes(state) || DONE_STATES.includes(state)) {
+    return null;
+  }
   if (jobStatus !== undefined && jobStatus !== null) return jobActivity(jobStatus);
   if (jobStatus === null) return state === 'WAITING_FOR_TASK' ? 'queued' : null;
   if (QUEUED_STATES.includes(state)) return 'queued';
