@@ -229,3 +229,96 @@ test('a finished story does not report the rebase and the push as skipped', () =
   assert.equal(progress.steps.find((step) => step.key === 'report')!.status, 'SKIPPED');
   assert.equal(progress.percent, 100);
 });
+
+test('a story waiting for a slot shows its step as queued rather than running', () => {
+  // Before, every step the task was sitting in pulsed as running, including a
+  // story that was only in the queue behind another one.
+  const progress = deriveTaskProgress(input({ state: 'ANALYSIS_QUEUED', activeJobStatus: 'PENDING' }));
+  const research = progress.steps[0]!;
+  assert.equal(research.status, 'QUEUED');
+  assert.equal(research.needsYou, false);
+  assert.equal(progress.percent, 0);
+});
+
+test('a queued state with no job still reads as queued', () => {
+  const progress = deriveTaskProgress(
+    input({
+      state: 'IMPLEMENTATION_QUEUED',
+      reviewApproved: true,
+      activeJobStatus: null,
+      runs: [run('RESEARCH', 'COMPLETED', [60, 55]), run('REVIEW', 'COMPLETED', [55, 50])],
+    }),
+  );
+  assert.equal(progress.steps.find((step) => step.key === 'implementation')!.status, 'QUEUED');
+  assert.equal(progress.steps.find((step) => step.key === 'approval')!.status, 'DONE');
+});
+
+test('a plan being rewritten is queued until its job starts, whatever the state says', () => {
+  // The orchestrator writes REVIEW_REGENERATING when it queues the job, so the
+  // state name alone would claim work that is not happening yet.
+  const runs = [run('RESEARCH', 'COMPLETED', [60, 55]), run('REVIEW', 'COMPLETED', [55, 50])];
+  const queued = deriveTaskProgress(input({ state: 'REVIEW_REGENERATING', activeJobStatus: 'PENDING', runs }));
+  assert.equal(queued.steps.find((step) => step.key === 'review')!.status, 'QUEUED');
+  const running = deriveTaskProgress(input({ state: 'REVIEW_REGENERATING', activeJobStatus: 'RUNNING', runs }));
+  assert.equal(running.steps.find((step) => step.key === 'review')!.status, 'RUNNING');
+});
+
+test('the push, which leaves no run, is running only while its job is', () => {
+  const runs = [
+    run('RESEARCH', 'COMPLETED', [60, 55]),
+    run('REVIEW', 'COMPLETED', [55, 50]),
+    run('IMPLEMENTATION', 'COMPLETED', [50, 30]),
+    run('QA', 'COMPLETED', [30, 20]),
+  ];
+  const running = deriveTaskProgress(input({ state: 'PUSHING', reviewApproved: true, activeJobStatus: 'RUNNING', runs }));
+  assert.equal(running.steps.find((step) => step.key === 'push')!.status, 'RUNNING');
+  const queued = deriveTaskProgress(input({ state: 'PUSHING', reviewApproved: true, activeJobStatus: 'PENDING', runs }));
+  assert.equal(queued.steps.find((step) => step.key === 'push')!.status, 'QUEUED');
+});
+
+test('queued checks still say which iteration came back', () => {
+  const progress = deriveTaskProgress(
+    input({
+      state: 'QA_QUEUED',
+      reviewApproved: true,
+      activeJobStatus: 'PENDING',
+      runs: [
+        run('RESEARCH', 'COMPLETED', [60, 55]),
+        run('REVIEW', 'COMPLETED', [55, 50]),
+        run('IMPLEMENTATION', 'COMPLETED', [50, 30]),
+        run('QA', 'COMPLETED', [30, 25]),
+      ],
+      qaRuns: [{ iteration: 1, verdict: 'REJECTED', findings: [{ id: 'f1' } as never] }],
+    }),
+  );
+  const checks = progress.steps.find((step) => step.key === 'qa')!;
+  assert.equal(checks.status, 'QUEUED');
+  assert.match(checks.detail, /Iteration 1: rejected, 1 finding/);
+});
+
+test('a plan waiting for a person stays waiting even with a job pending', () => {
+  const progress = deriveTaskProgress(input({ state: 'REVIEW_READY', activeJobStatus: 'PENDING' }));
+  const approval = progress.steps.find((step) => step.key === 'approval')!;
+  assert.equal(approval.status, 'WAITING');
+  assert.equal(approval.needsYou, true);
+});
+
+test('an interruption wins over a pending job', () => {
+  const progress = deriveTaskProgress(
+    input({
+      state: 'PAUSED',
+      previousState: 'IMPLEMENTING',
+      reviewApproved: true,
+      activeJobStatus: 'PENDING',
+      runs: [run('RESEARCH', 'COMPLETED', [60, 55]), run('REVIEW', 'COMPLETED', [55, 50])],
+    }),
+  );
+  assert.equal(progress.steps.find((step) => step.key === 'implementation')!.status, 'WAITING');
+});
+
+test('a caller that passes no job status sees a running run as running', () => {
+  const progress = deriveTaskProgress(
+    input({ state: 'ANALYZING', runs: [run('RESEARCH', 'RUNNING', [3, null])] }),
+  );
+  assert.equal(progress.steps[0]!.status, 'RUNNING');
+});

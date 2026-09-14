@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, type IdeaSession, type StoryDraft, type Task } from '../../lib/api';
 import { useProjects } from '../../components/shell';
-import { Button, Card, Dialog, Empty, ErrorText, Field, Loading, StateBadge, Tile } from '../../components/ui';
+import { Activity, Button, Card, Dialog, Empty, ErrorText, Field, Loading, StateBadge, Tile } from '../../components/ui';
+import { ideaActivity, jobStatusesByTask, taskActivity } from '../../lib/activity';
 import { DraftTextarea } from '../../components/draft-textarea';
 import { useAction } from '../../components/use-action';
 import { clearDraft, readDraft } from '../../lib/draft-field';
@@ -37,7 +38,7 @@ function matches(filter: Filter, state: string): boolean {
  * review, and an idea described in one line sent the research pass off to guess.
  */
 export default function StoriesPage() {
-  const { project, loading: shellLoading } = useProjects();
+  const { project, queue, loading: shellLoading } = useProjects();
   const router = useRouter();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [drafts, setDrafts] = useState<StoryDraft[]>([]);
@@ -138,6 +139,7 @@ export default function StoriesPage() {
   }
 
   const visible = tasks.filter((task) => matches(filter, task.state));
+  const jobStatusByTask = jobStatusesByTask(queue?.entries);
   const waiting = tasks.filter((task) => explainState(task.state).tone === 'waiting').length;
   const active = tasks.filter((task) => explainState(task.state).tone === 'running').length;
   const phase = loadPhase({ shellLoading, key, loadedFor, error });
@@ -199,13 +201,24 @@ export default function StoriesPage() {
                       ? 'Has questions for you'
                       : session.status === 'FAILED'
                         ? (session.error ?? 'Something went wrong')
-                        : 'Working on it'}{' '}
+                        : session.status === 'QUEUED'
+                          ? 'Not started yet'
+                          : 'Working on it'}{' '}
                     · {relativeAge(session.createdAt)}
                   </div>
                 </div>
-                <span className={`badge ${session.status === 'ASKING' ? 'waiting' : session.status === 'FAILED' ? 'critical' : 'running'}`}>
-                  {session.status === 'ASKING' ? 'Answer it' : session.status.toLowerCase()}
-                </span>
+                {session.status === 'ASKING' ? (
+                  <span className="badge waiting">Answer it</span>
+                ) : session.status === 'FAILED' ? (
+                  <span className="badge critical">failed</span>
+                ) : (
+                  <span className="meta">
+                    <Activity
+                      kind={ideaActivity(session.status)}
+                      label={session.status === 'THINKING' ? 'Thinking it through' : 'Waiting for a slot'}
+                    />
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -302,7 +315,7 @@ export default function StoriesPage() {
                   </div>
                   <div className="row">
                     {task.riskLevel ? <span className="badge caution">{task.riskLevel} risk</span> : null}
-                    <StateBadge state={task.state} />
+                    <StateBadge state={task.state} activity={taskActivity(task.state, jobStatusByTask.get(task.id))} />
                   </div>
                 </div>
               );

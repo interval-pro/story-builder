@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, type QueueEntry, type QueueView } from '../../lib/api';
-import { Alert, Button, Card, Empty, ErrorText, Loading, StateBadge, Tile } from '../../components/ui';
+import { Activity, Alert, Button, Card, Empty, ErrorText, Loading, StateBadge, Tile } from '../../components/ui';
 import { useAction } from '../../components/use-action';
 import { loadPhase } from '../../lib/load-state';
+import { jobActivity } from '../../lib/activity';
 import { formatDuration, relativeAge } from '../../lib/format';
 import { jobLabel } from '../../lib/labels';
 
@@ -163,7 +164,9 @@ export default function QueuePage() {
             {running.map((entry) => (
               <div key={entry.id} className="list-row accent-running">
                 <div className="grow">
-                  <div className="list-title">{jobLabel(entry.jobType)}</div>
+                  <div className="list-title">
+                    <Activity kind={jobActivity(entry.status)} label={jobLabel(entry.jobType)} />
+                  </div>
                   <div className="meta" style={{ marginTop: 9 }}>
                     {entry.projectName ?? '—'} · {entry.storyTitle ?? 'no story'} · running for{' '}
                     {formatDuration(entry.lockedAt ? Date.now() - Date.parse(entry.lockedAt) : null)}
@@ -205,7 +208,9 @@ export default function QueuePage() {
                   ::
                 </span>
                 <div className="grow">
-                  <div className="list-title">{jobLabel(entry.jobType)}</div>
+                  <div className="list-title">
+                    <Activity kind={jobActivity(entry.status)} label={jobLabel(entry.jobType)} />
+                  </div>
                   <div className="meta" style={{ marginTop: 9 }}>
                     {entry.projectName ?? '—'} · {entry.storyTitle ?? 'no story'} · queued {relativeAge(entry.createdAt)}
                     {entry.attempt > 0 ? ` · attempt ${entry.attempt} of ${entry.maxAttempts}` : ''}

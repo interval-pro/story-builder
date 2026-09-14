@@ -71,8 +71,8 @@ export function registerTaskRoutes(router: HttpRouter, context: ApiContext): voi
    * Where the task has got to, as a walk rather than a state name.
    *
    * Derived on the server because the derivation is domain logic, not a
-   * presentation detail: the CLI shows the same walk, and two implementations of
-   * it would disagree about what "done" means within a week.
+   * presentation detail, and two implementations of it would disagree about
+   * what "done" means within a week.
    */
   router.get('/api/tasks/:id/progress', async ({ params }) => {
     const task = await context.repos.tasks.getById(params['id']!);
@@ -83,6 +83,10 @@ export function registerTaskRoutes(router: HttpRouter, context: ApiContext): voi
     const review = await context.repos.reviews.findCurrentForTask(task.id);
     const version = review ? await context.repos.reviews.getLatestVersion(review.id) : null;
     const openBlockingDecisions = version ? await context.repos.reviewDecisions.openBlockingCount(version.id) : 0;
+    // Whether the current step is being worked on or only waiting for a slot is
+    // the job's to say, not the state name's.
+    const activeJob = await context.queue.findActiveForTask(task.id);
+    const activeJobStatus = activeJob?.status === 'PENDING' || activeJob?.status === 'RUNNING' ? activeJob.status : null;
 
     return {
       progress: deriveTaskProgress({
@@ -96,6 +100,7 @@ export function registerTaskRoutes(router: HttpRouter, context: ApiContext): voi
         reviewApproved: Boolean(approvedReviewVersionId),
         openBlockingDecisions,
         changedFiles: changes.length,
+        activeJobStatus,
       }),
     };
   });

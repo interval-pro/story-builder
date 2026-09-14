@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { api, type IdeaQuestion, type IdeaSession, type StoryDraft, type Task } from '../../../lib/api';
-import { Alert, Bar, Button, Card, Empty, ErrorText, Field, Loading, Spinner } from '../../../components/ui';
+import { Activity, Alert, Bar, Button, Card, Empty, ErrorText, Field, Loading, Spinner } from '../../../components/ui';
 import { useAction } from '../../../components/use-action';
 import { loadPhase } from '../../../lib/load-state';
+import { ideaActivity } from '../../../lib/activity';
 import { DraftTextarea } from '../../../components/draft-textarea';
 import { clearDraft, readDraft } from '../../../lib/draft-field';
 import { relativeAge } from '../../../lib/format';
@@ -97,7 +98,6 @@ export default function IdeaPage() {
   const { session, currentRound, history, drafts } = view;
   const answered = currentRound.filter((question) => question.answeredAt).length;
   const question = currentRound[index];
-  const thinking = session.status === 'QUEUED' || session.status === 'THINKING';
 
   return (
     <div className="page enter">
@@ -137,12 +137,26 @@ export default function IdeaPage() {
         </Alert>
       ) : null}
 
-      {thinking ? (
+      {ideaActivity(session.status) === 'working' ? (
         <Card>
-          <span className="meta">Reading the project</span>
+          <span className="meta">
+            <Activity kind="working" role="status" label="Reading the project" />
+          </span>
           <p className="body-sm">
             It is looking at the code this idea touches, so its questions are about your repository rather than about
             software in general. This is the cheap step; it takes a minute or two.
+          </p>
+        </Card>
+      ) : null}
+
+      {ideaActivity(session.status) === 'queued' ? (
+        <Card>
+          <span className="meta">
+            <Activity kind="queued" role="status" label="Waiting for a slot" />
+          </span>
+          <p className="body-sm">
+            Nothing has started on it yet. Another piece of work holds the slot, and this idea is read as soon as it
+            frees.
           </p>
         </Card>
       ) : null}
