@@ -49,18 +49,3 @@ export async function checkRemoteAccess(remoteUrl: string | null, token?: string
   }
 }
 
-/** What the cockpit says about a project, in one sentence. */
-export function describeRemoteAccess(access: RemoteAccess, remoteUrl: string | null): string {
-  switch (access) {
-    case 'WRITE':
-      return 'Stories here can push and open a pull request.';
-    case 'READ':
-      return 'The token can read this repository but not push to it, so stories finish on a local branch.';
-    case 'NONE':
-      return remoteUrl
-        ? 'The token cannot reach this repository, so stories finish on a local branch.'
-        : 'This repository has no remote, so stories finish on a local branch.';
-    default:
-      return 'Whether a push is possible is unknown: add a GitHub token and this is checked again.';
-  }
-}

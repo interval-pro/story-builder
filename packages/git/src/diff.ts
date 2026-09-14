@@ -57,13 +57,6 @@ export async function fullDiff(git: GitClient, baseRef: string, headRef = 'HEAD'
   return parts.join('');
 }
 
-/** Diff limited to a set of files, used when a QA finding points at one file. */
-export async function diffForFiles(git: GitClient, baseRef: string, files: string[]): Promise<string> {
-  if (files.length === 0) return '';
-  const result = await git.run(['diff', baseRef, 'HEAD', '--', ...files], { allowFailure: true });
-  return result.stdout;
-}
-
 export function summarizeChanges(changes: FileChange[]): string {
   if (changes.length === 0) return 'No files changed.';
   const insertions = changes.reduce((sum, change) => sum + change.insertions, 0);

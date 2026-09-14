@@ -14,7 +14,6 @@ async function runAndFormat(
     command,
     cwd: context.workspacePath,
     timeoutMs,
-    readOnly: !context.capabilities.includes('workspace.write'),
   });
   const body = [
     `$ ${command}`,
@@ -77,7 +76,7 @@ export const runSafeCommandTool: ToolSpec<RunCommandInput> = {
 /** Full command execution, only granted during implementation and integration. */
 export const runCommandTool: ToolSpec<RunCommandInput> = {
   name: 'run_command',
-  description: 'Run a command in the task sandbox. Available only after the review has been approved.',
+  description: 'Run a command in the project directory, on this story\'s branch. Available only after the review has been approved.',
   capability: 'command.run',
   phases: ['IMPLEMENTATION', 'INTEGRATION'],
   timeoutMs: 900_000,
@@ -162,7 +161,7 @@ interface InstallDependencyInput {
 
 export const installDependencyTool: ToolSpec<InstallDependencyInput> = {
   name: 'install_dependencies',
-  description: 'Install or update project dependencies inside the task sandbox.',
+  description: 'Install or update project dependencies in the project directory.',
   capability: 'dependencies.modify',
   phases: ['IMPLEMENTATION'],
   timeoutMs: 1_800_000,

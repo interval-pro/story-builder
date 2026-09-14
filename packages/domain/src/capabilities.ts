@@ -116,6 +116,3 @@ export function phaseForState(state: TaskState): ExecutionPhase | null {
   }
 }
 
-export function hasCapability(granted: readonly Capability[], required: Capability): boolean {
-  return granted.includes(required);
-}

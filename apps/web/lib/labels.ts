@@ -276,22 +276,4 @@ export function jobLabel(jobType: string): string {
   return JOB_LABELS[jobType] ?? jobType.toLowerCase().replace(/_/g, ' ');
 }
 
-const STEP_TONES: Record<string, Tone> = {
-  DONE: 'done',
-  RUNNING: 'running',
-  WAITING: 'waiting',
-  BLOCKED: 'critical',
-  FAILED: 'critical',
-  PENDING: 'running',
-  SKIPPED: 'running',
-};
 
-export function stepTone(status: string): Tone {
-  return STEP_TONES[status] ?? 'running';
-}
-
-export function riskTone(level: string | null): Tone {
-  if (level === 'HIGH') return 'critical';
-  if (level === 'MEDIUM') return 'caution';
-  return 'done';
-}

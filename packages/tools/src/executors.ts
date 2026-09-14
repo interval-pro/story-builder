@@ -1,15 +1,10 @@
 import { spawn } from 'node:child_process';
-import { createLogger } from '@ai-engine/shared';
-
-const logger = createLogger('command-executor');
 
 export interface CommandRequest {
   command: string;
   cwd?: string;
   timeoutMs: number;
   env?: Record<string, string>;
-  /** Read-only executions refuse to run in a writable container. */
-  readOnly?: boolean;
 }
 
 export interface CommandOutcome {
@@ -26,8 +21,11 @@ export interface CommandExecutor {
 }
 
 /**
- * Runs commands directly on the host inside the task worktree. Used when Docker
- * sandboxing is disabled, and by the sandbox manager itself.
+ * Runs commands on the host, in the project directory, on the story's branch.
+ *
+ * What a phase may run is decided before a command gets here, by the phase's
+ * capabilities and the command policy. Nothing below this line restricts a
+ * command further, and nothing pretends to.
  */
 export class LocalCommandExecutor implements CommandExecutor {
   readonly kind = 'local';
@@ -64,42 +62,5 @@ export class LocalCommandExecutor implements CommandExecutor {
         resolve({ exitCode: code ?? 1, stdout, stderr, timedOut, durationMs: Date.now() - started });
       });
     });
-  }
-}
-
-/**
- * Delegates execution to the sandbox manager, the only service that talks to
- * the Docker daemon. Workers never hold Docker privileges.
- */
-export class SandboxCommandExecutor implements CommandExecutor {
-  readonly kind = 'sandbox';
-
-  constructor(private readonly sandboxManagerUrl: string, private readonly taskId: string) {}
-
-  async run(request: CommandRequest): Promise<CommandOutcome> {
-    const started = Date.now();
-    const response = await fetch(`${this.sandboxManagerUrl}/sandboxes/${this.taskId}/exec`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        command: request.command,
-        cwd: request.cwd,
-        timeoutMs: request.timeoutMs,
-        env: request.env ?? {},
-        readOnly: request.readOnly ?? false,
-      }),
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      logger.error('sandbox exec failed', { status: response.status, text });
-      return {
-        exitCode: 1,
-        stdout: '',
-        stderr: `Sandbox execution failed: ${response.status} ${text}`,
-        timedOut: false,
-        durationMs: Date.now() - started,
-      };
-    }
-    return (await response.json()) as CommandOutcome;
   }
 }

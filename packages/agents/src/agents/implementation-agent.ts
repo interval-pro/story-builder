@@ -75,7 +75,7 @@ function renderRuntimeCommands(manifest: RuntimeManifestDocument | null): string
   ].join('\n');
 }
 
-/** Executes the approved plan inside the task sandbox. */
+/** Executes the approved plan on the story's own branch. */
 export async function runImplementationAgent(
   input: ImplementationAgentInput,
 ): Promise<{ outcome: ImplementationOutcome; run: AgentRunOutcome<ImplementationOutcome> }> {
@@ -87,8 +87,9 @@ export async function runImplementationAgent(
     '',
     '## Workspace',
     '',
-    'You are working in an isolated writable Git worktree of this repository. Changes here never',
-    'touch the developer working copy and are never pushed without a separate human approval.',
+    "You are working in the project's own directory, on a branch that belongs to this story. The",
+    "work branch is not touched until a person merges this story, and nothing is pushed without a",
+    'separate human approval. Do not switch branches: everything you change is committed to this one.',
     '',
     renderRuntimeCommands(input.runtimeManifest),
   ].join('\n');

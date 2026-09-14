@@ -6,10 +6,6 @@ import { camelize, camelizeAll } from '../mapping';
 const STORY_COLUMNS = 'id, project_id, title, current_revision, created_at, updated_at';
 const REVISION_COLUMNS = 'id, story_id, revision, body, created_by, created_at';
 
-export interface StoryWithRevision extends Story {
-  latestRevision: StoryRevision;
-}
-
 export class StoryRepository {
   constructor(private readonly db: Queryable) {}
 

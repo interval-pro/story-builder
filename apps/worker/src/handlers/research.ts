@@ -6,7 +6,6 @@ import {
   runResearchAgent,
   runReviewAgent,
   validateResearchFindings,
-  type AgentRunOutcome,
 } from '@ai-engine/agents';
 import { classifyTaskSize } from '@ai-engine/domain';
 import { impactFromReview, ConflictEngine } from '@ai-engine/conflict-engine';
@@ -85,7 +84,7 @@ export async function handleResearch(context: JobContext): Promise<void> {
 
   const { findings, sessionId } = await runResearchPhase(context, projectContext);
 
-  // The review runs next, in this job, over the same worktree the research just
+  // The review runs next, in this job, over the same checkout the research just
   // finished reading. Handing it that session is what stops it paying to read
   // the repository a second time.
   //
@@ -191,10 +190,10 @@ async function runResearchPhase(
  * inlined instead, which is either because no such artifact exists or because
  * the engine cannot reach one.
  *
- * Only the CLI engine can be handed a directory outside the worktree. The
+ * Only the CLI engine can be handed a directory outside the project. The
  * built-in engine acts through the tool registry, whose read tools resolve every
- * path against the worktree and refuse anything outside it, and the artifact
- * store is a sibling of the workspaces root. Pointing that engine at the file
+ * path against the project directory and refuse anything outside it, and the
+ * findings file is written to the state directory, which is outside it. Pointing that engine at the file
  * would deny the read on every review and quietly cost it the symbols, the
  * execution paths and the database, test, dependency and external notes.
  */

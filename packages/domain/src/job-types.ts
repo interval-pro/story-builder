@@ -29,19 +29,12 @@ export type JobType = (typeof JOB_TYPES)[number];
 export const JOB_STATUSES = ['PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
-export interface JobPayload {
-  taskId: string;
-  runId?: string;
-  reason?: string;
-  [key: string]: unknown;
-}
-
 /**
  * Whether a job occupies one of the global concurrency slots.
  *
  * The limit exists to bound how many heavy things run at once: agent sessions
  * and the build and test commands they need. Rendering a report, pushing a
- * branch or destroying a sandbox is not that, and a chat turn is a person
+ * branch or handing the directory back is not that, and a chat turn is a person
  * waiting at a keyboard, which must not queue behind a fix cycle.
  *
  * Stored on the job row as well, because the admission rule counts running

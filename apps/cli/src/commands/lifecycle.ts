@@ -1,43 +1,15 @@
-import { execFile } from 'node:child_process';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import { loadConfig } from '@ai-engine/shared';
 import { createRepositories, Database } from '@ai-engine/db';
 import { JobQueue } from '@ai-engine/queue';
-import { failure, heading, info, step, success, table } from '../output';
+import { failure, heading, info, success, table } from '../output';
 import { GitClient, readInstallationVersion } from '@ai-engine/git';
 import { fetchLatestRelease } from '@ai-engine/github';
 import { SYSTEM_VERSION } from './init';
 import { resolveProject } from '../project';
 
-const execFileAsync = promisify(execFile);
-
-async function compose(args: string[], cwd: string): Promise<number> {
-  try {
-    const { stdout, stderr } = await execFileAsync('docker', ['compose', ...args], { cwd });
-    if (stdout.trim()) info(stdout.trim());
-    if (stderr.trim()) info(stderr.trim());
-    return 0;
-  } catch (error) {
-    const failureDetail = error as { stderr?: string; stdout?: string };
-    failure(failureDetail.stderr ?? failureDetail.stdout ?? String(error));
-    return 1;
-  }
-}
-
-export async function startCommand(repoPath: string): Promise<number> {
-  heading('Starting the AI engineering stack');
-  step('docker compose up -d');
-  return compose(['up', '-d'], repoPath);
-}
-
-export async function stopCommand(repoPath: string): Promise<number> {
-  heading('Stopping the AI engineering stack');
-  return compose(['down'], repoPath);
-}
-
-export async function statusCommand(repoPath: string, options: { project?: string | undefined } = {}): Promise<number> {
+export async function statusCommand(options: { project?: string | undefined } = {}): Promise<number> {
   const config = loadConfig();
   heading('AI Engineering System - status');
 
@@ -91,20 +63,10 @@ export async function statusCommand(repoPath: string, options: { project?: strin
     heading('Services');
     table([
       ['API', apiHealthy ? 'up' : 'down'],
-      ['Sandbox manager', (await sandboxHealthy()) ? 'up' : 'down'],
     ]);
     return 0;
   } finally {
     await db.close();
-  }
-}
-
-async function sandboxHealthy(): Promise<boolean> {
-  try {
-    const response = await fetch(`${loadConfig().service.sandboxManagerUrl}/health`);
-    return response.ok;
-  } catch {
-    return false;
   }
 }
 
@@ -193,7 +155,6 @@ export async function versionCommand(): Promise<number> {
   heading('Story Builder - version');
   table([
     ['Installation', config.paths.installRoot],
-    ['Project', config.paths.projectRoot],
     ['Release', version.tag ?? 'none'],
     ['Commit', version.commit.slice(0, 10)],
     ['Local commits', String(version.localCommits)],

@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { AppError, createLogger, loadConfig, newId, slugify } from '@ai-engine/shared';
+import { AppError, createLogger, loadConfig, slugify } from '@ai-engine/shared';
 import {
   classifyRisk,
   classifyTaskSize,
@@ -647,6 +647,3 @@ export type UnblockTarget = keyof typeof UNBLOCK_JOBS;
 
 export const UNBLOCK_TARGETS = Object.keys(UNBLOCK_JOBS) as UnblockTarget[];
 
-export function newActorId(prefix: string): string {
-  return `${prefix}-${newId().slice(0, 8)}`;
-}

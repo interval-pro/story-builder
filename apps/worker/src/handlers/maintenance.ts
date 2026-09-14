@@ -1,4 +1,3 @@
-import { createLogger } from '@ai-engine/shared';
 import { runLearningAgent } from '@ai-engine/agents';
 import { KnowledgeService } from '@ai-engine/project-knowledge';
 import { detectRuntimeManifest, manifestGaps, toYaml, validateRuntimeManifest } from '@ai-engine/runtime-manifest';
@@ -16,8 +15,6 @@ import {
 } from '../job-context';
 import type { ProjectJobContext } from '../project-context';
 import { releaseDirectory } from '../project-directory';
-
-const logger = createLogger('maintenance');
 
 /**
  * Extracts the reasoning behind human corrections and writes it into the
@@ -134,7 +131,7 @@ export async function handleKnowledgeRefresh(context: ProjectJobContext): Promis
 
 /**
  * Detects how the project builds and tests, then proves it by running those
- * commands in a sandbox. A manifest that has not run is not trusted.
+ * commands. A manifest that has not run is not trusted.
  */
 export async function handleRuntimeManifest(context: JobContext): Promise<void> {
   const detected = await detectRuntimeManifest(context.project.repoPath);

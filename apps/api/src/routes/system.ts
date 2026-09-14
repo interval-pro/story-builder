@@ -53,7 +53,6 @@ export function registerSystemRoutes(router: HttpRouter, context: ApiContext): v
     const version = await readInstallationVersion(config.paths.installRoot, latest?.tag ?? null);
     return {
       installRoot: config.paths.installRoot,
-      projectRoot: config.paths.projectRoot,
       releaseUrl: latest?.url ?? null,
       ...version,
     };

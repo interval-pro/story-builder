@@ -7,11 +7,8 @@
   "scripts": { "build": "tsc -b" },
   "dependencies": {
     "@ai-engine/ai-provider": "*",
-    "@ai-engine/artifacts": "*",
-    "@ai-engine/db": "*",
     "@ai-engine/domain": "*",
     "@ai-engine/git": "*",
-    "@ai-engine/security": "*",
     "@ai-engine/shared": "*",
     "@ai-engine/tools": "*"
   }

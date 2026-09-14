@@ -44,8 +44,9 @@ knowledge, principles, chats, statistics — belongs to the project it came from
 
 ## Requirements
 
-Docker, Docker Compose and Git. Node.js 20 or newer if you want to run the
-services outside Docker.
+Docker, for Postgres. Git. Node.js 20 or newer. The services themselves run on
+your machine rather than in containers, because the agents use the login your
+`claude` CLI already has and work in your project directories.
 
 ## Getting started
 
@@ -143,8 +144,7 @@ apps/
   api/              HTTP API, the only way the UI reaches the system
   orchestrator/     the sole authority over task state
   worker/           claims jobs from the durable queue and runs the agents
-  sandbox-manager/  the only service with Docker privileges
-  cli/              ai-engine init / start / stop / status / export / import
+  cli/              ai-engine init / version / status / export / import
   web/              the cockpit
 
 packages/
@@ -152,7 +152,7 @@ packages/
   db/               schema, migrations and repositories
   events/           the append-only event log
   queue/            the Postgres job queue
-  artifacts/        artifact storage, out of Postgres
+  artifacts/        artifact storage, in Postgres
   ai-provider/      Anthropic, OpenAI and mock adapters
   claude-code/      runs each agent as a headless Claude Code session
   tools/            the tool layer that every agent action goes through
@@ -255,11 +255,11 @@ npm run migrate
 ```
 
 Each service can be run on its own with `npm run dev:api`, `dev:orchestrator`,
-`dev:worker`, `dev:sandbox-manager` and `dev:web`.
+`dev:worker` and `dev:web`.
 
 `npm test` runs against the TypeScript sources through a resolver in `scripts/`,
 so the unit suite works without a build. `npm run build` compiles every package
-with project references and is what the Docker images use.
+with project references.
 
 ## Configuration
 
@@ -277,7 +277,6 @@ The ones that change behaviour most:
 
 | Variable | Meaning |
 | --- | --- |
-| `PROJECT_ROOT` | Optional. A first repository to register at install time; projects are added from the cockpit |
 | `AGENT_ENGINE` | `claude-code` (default) or `builtin` |
 | `AGENT_ALLOW_SUBAGENTS` | `false` (default). Lets an agent delegate. If you turn it on, one subagent at a time is the limit; the CLI cannot enforce that |
 | `AI_PROVIDER` | Only for the builtin engine: `anthropic`, `openai` or `mock` |

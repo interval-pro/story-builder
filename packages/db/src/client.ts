@@ -96,17 +96,3 @@ export class Database implements Queryable {
     await this.pool.end();
   }
 }
-
-let singleton: Database | undefined;
-
-export function getDatabase(): Database {
-  if (!singleton) singleton = new Database();
-  return singleton;
-}
-
-export async function closeDatabase(): Promise<void> {
-  if (singleton) {
-    await singleton.close();
-    singleton = undefined;
-  }
-}

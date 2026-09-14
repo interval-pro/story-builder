@@ -49,7 +49,7 @@ export async function handleIntegrationValidation(context: JobContext): Promise<
     const outcome = await executor.run({
       command,
       cwd: workspacePath,
-      timeoutMs: config.sandbox.commandTimeoutMs,
+      timeoutMs: config.service.commandTimeoutMs,
     });
     const artifact = await context.artifacts.put({
       projectId: context.project.id,

@@ -1,4 +1,3 @@
-import path from 'node:path';
 import { AppError } from './errors';
 import { stateRootFor } from './paths';
 
@@ -26,30 +25,18 @@ export interface PathsConfig {
    * and scratch copies of artifacts. See `statePaths`.
    */
   stateRoot: string;
-  /** Absolute path of the repository this installation works on. */
-  projectRoot: string;
-  /**
-   * Where the unused Docker sandbox would put worktrees.
-   *
-   * Nothing in the task path reads this any more: a story works in the project
-   * directory on a branch of its own. It stays only because the sandbox manager
-   * is still in the tree, unstarted.
-   */
-  workspacesRoot: string;
 }
 
 export interface ServiceConfig {
   env: 'development' | 'test' | 'production';
   apiPort: number;
   apiBaseUrl: string;
-  sandboxManagerPort: number;
-  sandboxManagerUrl: string;
   orchestratorTickMs: number;
   workerPollMs: number;
   workerConcurrency: number;
-  maxQaIterations: number;
-  jobMaxAttempts: number;
   jobLeaseSeconds: number;
+  /** How long one build, test or setup command may run before it is stopped. */
+  commandTimeoutMs: number;
 }
 
 export interface AgentEngineConfig {
@@ -85,14 +72,6 @@ export interface SystemConfig {
   service: ServiceConfig;
   agents: AgentEngineConfig;
   github: GitHubConfig;
-  sandbox: {
-    enabled: boolean;
-    image: string;
-    cpuLimit: string;
-    memoryLimit: string;
-    networkMode: string;
-    commandTimeoutMs: number;
-  };
 }
 
 function str(name: string, fallback?: string): string {
@@ -140,7 +119,6 @@ export function loadConfig(reload = false): SystemConfig {
   if (cached && !reload) return cached;
   const provider = str('AI_PROVIDER', 'mock') as AiProviderConfig['provider'];
   const apiPort = int('API_PORT', 4000);
-  const sandboxManagerPort = int('SANDBOX_MANAGER_PORT', 4100);
   const installRoot = str('INSTALL_ROOT', process.cwd());
   const stateRoot = str('STATE_ROOT', stateRootFor(installRoot));
   cached = {
@@ -160,27 +138,22 @@ export function loadConfig(reload = false): SystemConfig {
     paths: {
       installRoot,
       stateRoot,
-      projectRoot: str('PROJECT_ROOT', process.cwd()),
-      workspacesRoot: str('WORKSPACES_ROOT', path.join(stateRoot, 'workspaces')),
     },
     service: {
       env: (str('NODE_ENV', 'development') as ServiceConfig['env']),
       apiPort,
       apiBaseUrl: str('API_BASE_URL', `http://localhost:${apiPort}`),
-      sandboxManagerPort,
-      sandboxManagerUrl: str('SANDBOX_MANAGER_URL', `http://localhost:${sandboxManagerPort}`),
       orchestratorTickMs: int('ORCHESTRATOR_TICK_MS', 2000),
       workerPollMs: int('WORKER_POLL_MS', 1000),
       workerConcurrency: int('WORKER_CONCURRENCY', 2),
-      maxQaIterations: int('MAX_QA_ITERATIONS', 5),
-      jobMaxAttempts: int('JOB_MAX_ATTEMPTS', 3),
       // Clamped, because a lease shorter than the heartbeat can renew is how two
-      // agents end up in one worktree. The worker renews every
+      // agents end up in one project directory. The worker renews every
       // max(30s, lease/3), so anything under 90s is reclaimed while it is still
       // running and a second worker starts the same job from the top. The agent
       // notices — it reports a concurrent writer and refuses — but by then two
       // sessions have been paid for.
       jobLeaseSeconds: Math.max(120, int('JOB_LEASE_SECONDS', 900)),
+      commandTimeoutMs: int('COMMAND_TIMEOUT_MS', 900_000),
     },
     agents: {
       engine: (str('AGENT_ENGINE', 'claude-code') as AgentEngineConfig['engine']),
@@ -193,14 +166,6 @@ export function loadConfig(reload = false): SystemConfig {
     github: {
       token: optional('GITHUB_TOKEN'),
       apiBaseUrl: str('GITHUB_API_BASE_URL', 'https://api.github.com'),
-    },
-    sandbox: {
-      enabled: bool('SANDBOX_DOCKER_ENABLED', true),
-      image: str('SANDBOX_IMAGE', 'ai-engine/sandbox:latest'),
-      cpuLimit: str('SANDBOX_CPU_LIMIT', '2'),
-      memoryLimit: str('SANDBOX_MEMORY_LIMIT', '4g'),
-      networkMode: str('SANDBOX_NETWORK_MODE', 'bridge'),
-      commandTimeoutMs: int('SANDBOX_COMMAND_TIMEOUT_MS', 900_000),
     },
   };
   return cached;

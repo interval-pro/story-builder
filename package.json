@@ -16,13 +16,11 @@
     "build:clean": "tsc -b tsconfig.build.json --clean",
     "typecheck": "tsc -b tsconfig.build.json --pretty",
     "test": "node --import ./scripts/register-source.mjs --test \"packages/*/test/*.test.ts\" \"apps/*/test/*.test.ts\"",
-    "lint": "eslint . --ext .ts,.tsx",
     "migrate": "node packages/db/dist/cli/migrate.js",
     "db:reset": "npm run migrate -- --reset",
     "dev:api": "tsx watch apps/api/src/main.ts",
     "dev:orchestrator": "tsx watch apps/orchestrator/src/main.ts",
     "dev:worker": "tsx watch apps/worker/src/main.ts",
-    "dev:sandbox-manager": "tsx watch apps/sandbox-manager/src/main.ts",
     "dev:web": "npm --workspace @ai-engine/web run dev",
     "ai-engine": "tsx apps/cli/src/main.ts"
   },

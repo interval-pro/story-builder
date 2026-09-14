@@ -44,8 +44,7 @@ async function runProjectTests(context: JobContext, runId: string): Promise<{ co
     const outcome = await executor.run({
       command,
       cwd: context.project.repoPath,
-      timeoutMs: loadConfig().sandbox.commandTimeoutMs,
-      readOnly: true,
+      timeoutMs: loadConfig().service.commandTimeoutMs,
     });
     const output = `${outcome.stdout}\n${outcome.stderr}`.trim();
     const artifact = await context.artifacts.put({
@@ -84,7 +83,6 @@ async function runProjectTests(context: JobContext, runId: string): Promise<{ co
  * iterations the task is blocked for a human instead of looping forever.
  */
 export async function handleQa(context: JobContext): Promise<void> {
-  const config = loadConfig();
   await takeDirectory(context);
 
   await context.orchestrator.ensureState({

@@ -34,7 +34,7 @@ export interface ReviewAgentInput {
   previousReview?: { document: ReviewDocument; notes: ReviewNote[] };
   /**
    * Continues the research conversation instead of opening a cold one. The two
-   * run back to back in the same job over the same worktree, so a cold review
+   * run back to back in the same job over the same checkout, so a cold review
    * pays to read a repository that was just read.
    *
    * The prompt shape does not change when this is set, which is what makes the

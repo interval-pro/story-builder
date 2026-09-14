@@ -1,76 +1,28 @@
-import { execFile } from 'node:child_process';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import { loadConfig } from '@ai-engine/shared';
 import { createRepositories, Database, migrate } from '@ai-engine/db';
 import { GitClient, readInstallationVersion } from '@ai-engine/git';
 import { fetchLatestRelease } from '@ai-engine/github';
 import { TaskCommands } from '@ai-engine/orchestrator';
 import { KnowledgeService } from '@ai-engine/project-knowledge';
-import { detectRuntimeManifest, manifestGaps } from '@ai-engine/runtime-manifest';
-import { failure, heading, info, step, success, table, warn } from '../output';
-
-const execFileAsync = promisify(execFile);
+import { detectRuntimeManifest } from '@ai-engine/runtime-manifest';
+import { heading, info, step, success, table } from '../output';
 
 export const SYSTEM_VERSION = '0.1.0';
 
-async function dockerAvailable(): Promise<boolean> {
-  try {
-    await execFileAsync('docker', ['version', '--format', '{{.Server.Version}}']);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
- * Registers the installation, and optionally a first project.
+ * Registers the installation itself as a project.
  *
- * A repository is optional because an installation serves as many projects as
- * are added to it from the cockpit. Installing with none is the normal first
- * step: the engine comes up, and the first project is one click away. Passing one
- * here is a convenience for an installation that already knows what it is for.
+ * Run by dev-up.sh the first time it finds a database that does not know about
+ * the installation. Projects to work on are added from the cockpit, which is
+ * the one path that prepares them properly: it checks the repository, records
+ * the branch and whether the token can push, and reads it once in the
+ * background. An older `--repo` option here registered a project around all of
+ * that and was removed.
  */
-export async function initCommand(options: {
-  repoPath: string | null;
-  installRoot: string;
-  skipDocker: boolean;
-}): Promise<number> {
+export async function initCommand(options: { installRoot: string }): Promise<number> {
   const config = loadConfig();
   heading('Story Builder - init');
-
-  let root: string | null = null;
-  let defaultBranch = '';
-  let head = '';
-  let remoteUrl: string | null = null;
-
-  if (options.repoPath) {
-    const git = new GitClient(options.repoPath);
-    step('Validating the project repository');
-    if (!(await git.isRepository())) {
-      failure(`${options.repoPath} is not a Git repository.`);
-      return 1;
-    }
-    root = await git.repositoryRoot();
-    if (!(await git.hasCommits())) {
-      failure(`${root} has no commits yet.`);
-      failure('Every task starts from a base commit, so make the first commit and run init again.');
-      return 1;
-    }
-    defaultBranch = await git.defaultBranch();
-    head = await git.headCommit();
-    remoteUrl = await git.remoteUrl();
-    success(`Repository ${root} on ${defaultBranch} at ${head.slice(0, 10)}`);
-
-    if (path.resolve(root) === path.resolve(options.installRoot)) {
-      failure('The installation and the project are the same directory.');
-      failure('Install the engine outside the repository it works on, for example under ~/.story-builder.');
-      return 1;
-    }
-  } else {
-    info('No repository was given, so the installation is registered on its own.');
-    info('Add the projects you want worked on from the cockpit.');
-  }
 
   step('Reading the installation');
   const installGit = new GitClient(options.installRoot);
@@ -79,63 +31,26 @@ export async function initCommand(options: {
   const version = await readInstallationVersion(options.installRoot, latest?.tag ?? null);
   success(`Installation ${options.installRoot} at ${version.tag ?? version.commit.slice(0, 10)}`);
 
-  step('Checking Docker');
-  const docker = await dockerAvailable();
-  if (!docker && !options.skipDocker) {
-    warn('Docker is not available, and it is needed for Postgres.');
-  } else if (docker) {
-    success('Docker is available');
-  }
-
   step('Migrating the installation database');
   const db = new Database();
   try {
     const applied = await migrate(db);
     success(applied.length === 0 ? 'Database already up to date' : `Applied ${applied.length} migration(s)`);
 
-    const commands = new TaskCommands(db);
-
     // The installation is a project too, so a story can change the engine that
     // serves these repositories without touching any of them.
     step('Registering the installation as a project');
-    const installProject = await commands.ensureProject({
+    const installProject = await new TaskCommands(db).ensureProject({
       name: `${path.basename(options.installRoot)} (installation)`,
       repoPath: path.resolve(options.installRoot),
       kind: 'INSTALLATION',
     });
     success(installProject.created ? 'Installation registered' : 'Installation already registered');
 
-    const repositories = createRepositories(db);
-    const knowledge = new KnowledgeService(db);
-
-    if (root) {
-      step('Registering the project');
-      const project = await commands.ensureProject({ name: path.basename(root), repoPath: root });
-      success(project.created ? 'Project registered' : 'Project already registered');
-
-      // Nothing is written into the project. Not a marker, not a manifest, not a
-      // rules directory. What the system works out about a repository belongs in
-      // its own database, where it can be changed, versioned and deleted with the
-      // project rather than left behind in someone else's tree.
-      step('Inspecting the project runtime');
-      const manifest = await detectRuntimeManifest(root);
-      await repositories.runtimeManifests.create(project.id, manifest);
-      success(`Runtime manifest generated (${manifest.project.language.join(', ') || 'no language detected'})`);
-      for (const gap of manifestGaps(manifest)) warn(gap);
-
-      step('Building the initial project knowledge');
-      const { snapshot, extraction } = await knowledge.buildSnapshot({
-        projectId: project.id,
-        gitCommit: head,
-        repositoryPath: root,
-      });
-      success(`Knowledge snapshot ${snapshot.sequence} built from ${extraction.entities.length} entities`);
-    }
-
     step('Building the knowledge for the installation');
     const installManifest = await detectRuntimeManifest(options.installRoot);
-    await repositories.runtimeManifests.create(installProject.id, installManifest);
-    const installKnowledge = await knowledge.buildSnapshot({
+    await createRepositories(db).runtimeManifests.create(installProject.id, installManifest);
+    const installKnowledge = await new KnowledgeService(db).buildSnapshot({
       projectId: installProject.id,
       gitCommit: await installGit.headCommit(),
       repositoryPath: path.resolve(options.installRoot),
@@ -144,18 +59,14 @@ export async function initCommand(options: {
 
     heading('Ready');
     table([
-      ['Project', root ?? 'none yet — add one from the cockpit'],
       ['Installation', options.installRoot],
       ['Installation branch', await installGit.currentBranch().catch(() => 'detached')],
       ['Version', version.tag ?? version.commit.slice(0, 10)],
       ['Latest release', latest?.tag ?? 'unknown'],
-      ['Default branch', defaultBranch || '—'],
-      ['Remote', remoteUrl ?? 'none (pull requests are disabled)'],
       ['AI provider', `${config.ai.provider} (${config.ai.model})`],
       ['Where stories run', 'in the project directory, one branch per story'],
-      ['Web UI', 'http://localhost:3000'],
     ]);
-    info('\nStart the system with: ./scripts/dev-up.sh\n');
+    info('\nAdd the projects you want worked on from the cockpit.\n');
     return 0;
   } finally {
     await db.close();

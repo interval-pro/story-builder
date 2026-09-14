@@ -1,4 +1,4 @@
-import { AppError, createLogger, loadConfig, type Logger } from '@ai-engine/shared';
+import { AppError, loadConfig, type Logger } from '@ai-engine/shared';
 import {
   SETTING_KEYS,
   capabilitiesForPhase,
@@ -15,9 +15,8 @@ import { createRepositories, type Database, type Repositories, type RunCompletio
 import { EventLog } from '@ai-engine/events';
 import { DatabaseArtifactStore, type ArtifactStore } from '@ai-engine/artifacts';
 import { createProviderOrMock } from '@ai-engine/ai-provider';
-import { ALL_TOOLS, LocalCommandExecutor, SandboxCommandExecutor, ToolRegistry, toolPolicyVersion, type CommandExecutor, type ToolContext } from '@ai-engine/tools';
+import { ALL_TOOLS, LocalCommandExecutor, ToolRegistry, toolPolicyVersion, type CommandExecutor, type ToolContext } from '@ai-engine/tools';
 import { ClaudeCodeAgentRunner } from '@ai-engine/claude-code';
-import { GitClient } from '@ai-engine/git';
 import { SecretsService } from '@ai-engine/security';
 import { ProjectBrain } from '@ai-engine/project-brain';
 import { KnowledgeService } from '@ai-engine/project-knowledge';
@@ -112,28 +111,10 @@ const EFFORT_BY_SIZE: Record<TaskSize, 'low' | 'medium' | 'high'> = {
 };
 
 /**
- * Where an agent works: the project's own directory.
- *
- * There are no worktrees. A story takes the directory, works on its own branch
- * and gives it back; the queue guarantees only one story holds it at a time. What
- * this removes is a full copy of the repository and its dependencies per task,
- * which was the entire disk cost of the system.
- */
-export function projectPathFor(context: { project: { repoPath: string } }): string {
-  return context.project.repoPath;
-}
-
-/**
- * Workers never talk to Docker. When sandboxing is enabled every command goes
- * through the sandbox manager; otherwise it runs locally in the worktree.
- */
-/**
  * Commands run in the project directory, on the story's branch.
  *
- * The Docker sandbox mounted a worktree; with no worktree there is nothing to
- * mount, so it is not reachable from here any more. The isolation that remains is
- * the branch: everything an agent does is committed to it and nothing touches the
- * work branch until a merge someone asked for.
+ * The isolation is the branch: everything an agent does is committed to it, and
+ * nothing touches the work branch until a merge someone asked for.
  */
 export function createExecutor(repoPath: string): CommandExecutor {
   return new LocalCommandExecutor(repoPath);
@@ -229,7 +210,7 @@ export function createAiProvider() {
 
 /**
  * Chooses the execution engine. Claude Code runs the agent as a headless
- * session inside the task worktree; the built-in loop is the offline fallback
+ * session in the project directory; the built-in loop is the offline fallback
  * and what the tests exercise.
  */
 export async function createAgentRunner(input: {
@@ -239,7 +220,7 @@ export async function createAgentRunner(input: {
   allowWeb?: boolean;
   /** Scales reasoning effort to the change. Omitted means the phase default. */
   size?: TaskSize;
-  /** Directories outside the worktree this phase's work pass may read. */
+  /** Directories outside the project this phase's work pass may read. */
   additionalDirectories?: string[];
 }): Promise<AgentRunner> {
   const config = loadConfig();
@@ -495,19 +476,3 @@ export async function recordEngineMetrics(
   }
 }
 
-/**
- * Commits whatever the agent left in the worktree.
- *
- * Nothing else commits before integration, so an uncommitted phase result only
- * survives while its worktree does. Committing at the end of each run makes the
- * branch the record instead, which is what lets a retry or a fix continue from
- * the work rather than from the base commit.
- */
-export async function commitWorkspace(context: JobContext, git: GitClient): Promise<string | null> {
-  await git.addAll();
-  if (!(await git.hasStagedChanges())) return null;
-  return git.commit(`ai: ${context.story.title}`.slice(0, 100), {
-    name: 'AI Engineering System',
-    email: 'ai-engine@localhost',
-  });
-}

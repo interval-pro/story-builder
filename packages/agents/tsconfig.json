@@ -5,10 +5,7 @@
   "references": [
     { "path": "../shared" },
     { "path": "../domain" },
-    { "path": "../db" },
     { "path": "../git" },
-    { "path": "../security" },
-    { "path": "../artifacts" },
     { "path": "../ai-provider" },
     { "path": "../tools" }
   ]

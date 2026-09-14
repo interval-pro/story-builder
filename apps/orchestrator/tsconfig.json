@@ -9,7 +9,6 @@
     { "path": "../../packages/events" },
     { "path": "../../packages/queue" },
     { "path": "../../packages/git" },
-    { "path": "../../packages/artifacts" },
     { "path": "../../packages/conflict-engine" }
   ]
 }
