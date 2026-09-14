@@ -1,0 +1,510 @@
+/**
+ * Markdown, as the chat window reads an engine reply.
+ *
+ * This turns a reply into plain data and nothing else: the component that shows
+ * it builds React elements from that data, so no part of a reply is ever handed
+ * to the browser as HTML. Replies carry repository text and tool output, and the
+ * page that shows them drives an engine that can change files, so that property
+ * is the point of writing this here rather than pulling in a renderer.
+ *
+ * It is deliberately smaller than CommonMark. It covers what replies use —
+ * fenced code, headings, lists, quotes, rules, inline code, emphasis and links —
+ * and it is forgiving where a reply is still being written: an unclosed fence is
+ * code to the end, and a marker with no partner stays on the page as typed.
+ * Tables and raw HTML are left as text. Single line breaks are kept, which is how
+ * a chat reads and how these replies looked before they were formatted.
+ */
+
+export type MarkdownInline =
+  | { type: 'text'; text: string }
+  | { type: 'code'; text: string }
+  | { type: 'strong'; children: MarkdownInline[] }
+  | { type: 'emphasis'; children: MarkdownInline[] }
+  | { type: 'link'; href: string; children: MarkdownInline[] };
+
+export type MarkdownBlock =
+  | { type: 'heading'; level: 1 | 2 | 3 | 4 | 5 | 6; children: MarkdownInline[] }
+  | { type: 'paragraph'; lines: MarkdownInline[][] }
+  | { type: 'list'; ordered: boolean; start: number; items: MarkdownBlock[][] }
+  | { type: 'blockquote'; children: MarkdownBlock[] }
+  | { type: 'code'; info: string; code: string; closed: boolean }
+  | { type: 'rule' };
+
+// Nesting past this is flattened to paragraphs, so a line of a thousand `>`
+// cannot recurse a thousand deep.
+const MAX_BLOCK_DEPTH = 12;
+const MAX_INLINE_DEPTH = 8;
+const MAX_LINK_LABEL = 1000;
+const MAX_LINK_URL = 2048;
+
+const FENCE = /^( {0,3})(`{3,}|~{3,})(.*)$/;
+const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/;
+const RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+const LIST_ITEM = /^( *)([-*+]|\d{1,9}[.)])(?:([ \t]+)(.*))?$/;
+const BLOCKQUOTE = /^ {0,3}> ?(.*)$/;
+const BLANK = /^[ \t]*$/;
+const ESCAPABLE = /[!-/:-@[-`{-~]/;
+
+export function parseMarkdown(source: string): MarkdownBlock[] {
+  const normalised = source.replace(/\r\n?/g, '\n').replace(/\n+$/, '');
+  if (normalised.trim() === '') return [];
+  return parseBlocks(normalised.split('\n'), 0);
+}
+
+/**
+ * Only web and mail links are kept. Control and whitespace characters are removed
+ * before the check, because browsers ignore them inside a scheme and
+ * `java\tscript:` would otherwise slip past a naive prefix test; the cleaned
+ * value is also what is returned, so what was checked is what is used.
+ */
+export function safeHref(raw: string): string | null {
+  const cleaned = raw.replace(/[\s\u0000-\u001f\u007f-\u009f]/g, '');
+  return /^(?:https?:\/\/|mailto:)./i.test(cleaned) ? cleaned : null;
+}
+
+interface Fence {
+  indent: number;
+  marker: string;
+  length: number;
+  info: string;
+}
+
+function fenceOpen(line: string): Fence | null {
+  const match = FENCE.exec(line);
+  if (!match) return null;
+  const marker = match[2]!;
+  const info = match[3]!;
+  // A backtick fence cannot have a backtick after it: that is inline code on a line of its own.
+  if (marker[0] === '`' && info.includes('`')) return null;
+  return { indent: match[1]!.length, marker: marker[0]!, length: marker.length, info: info.trim() };
+}
+
+function fenceCloses(line: string, fence: { marker: string; length: number }): boolean {
+  const match = /^ {0,3}(`+|~+)[ \t]*$/.exec(line);
+  return !!match && match[1]![0] === fence.marker && match[1]!.length >= fence.length;
+}
+
+interface ListMarker {
+  indent: number;
+  ordered: boolean;
+  number: number;
+  contentIndent: number;
+  content: string;
+}
+
+function listMarker(line: string): ListMarker | null {
+  const match = LIST_ITEM.exec(line);
+  if (!match) return null;
+  const indent = match[1]!.length;
+  const marker = match[2]!;
+  const spacing = match[3] ?? '';
+  const ordered = /\d/.test(marker[0]!);
+  // Spacing of more than four is the item's content indented, not the marker's gap.
+  const gap = spacing.length === 0 || spacing.length > 4 ? 1 : spacing.length;
+  return {
+    indent,
+    ordered,
+    number: ordered ? Number.parseInt(marker, 10) : 1,
+    contentIndent: indent + marker.length + gap,
+    content: spacing.length > 4 ? spacing.slice(1) + (match[4] ?? '') : (match[4] ?? ''),
+  };
+}
+
+function startsBlock(line: string): boolean {
+  if (fenceOpen(line) || HEADING.test(line) || RULE.test(line) || BLOCKQUOTE.test(line)) return true;
+  const item = listMarker(line);
+  // An empty item does not interrupt a paragraph: a line reading "2024." is prose.
+  return !!item && item.indent <= 3 && item.content.trim() !== '';
+}
+
+function leadingSpaces(line: string): number {
+  return line.length - line.trimStart().length;
+}
+
+function stripIndent(line: string, count: number): string {
+  let removed = 0;
+  while (removed < count && line[removed] === ' ') removed += 1;
+  return line.slice(removed);
+}
+
+function parseBlocks(lines: string[], depth: number): MarkdownBlock[] {
+  if (depth > MAX_BLOCK_DEPTH) {
+    const text = lines.filter((line) => !BLANK.test(line));
+    return text.length ? [{ type: 'paragraph', lines: text.map((line) => parseInline(line.trim())) }] : [];
+  }
+
+  const blocks: MarkdownBlock[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index]!;
+
+    if (BLANK.test(line)) {
+      index += 1;
+      continue;
+    }
+
+    const fence = fenceOpen(line);
+    if (fence) {
+      const code: string[] = [];
+      let closed = false;
+      index += 1;
+      while (index < lines.length) {
+        if (fenceCloses(lines[index]!, fence)) {
+          closed = true;
+          index += 1;
+          break;
+        }
+        code.push(stripIndent(lines[index]!, fence.indent));
+        index += 1;
+      }
+      blocks.push({ type: 'code', info: fence.info, code: code.join('\n'), closed });
+      continue;
+    }
+
+    const heading = HEADING.exec(line);
+    if (heading) {
+      const text = (heading[2] ?? '').replace(/(?:^|[ \t]+)#+[ \t]*$/, '').trim();
+      const level = heading[1]!.length as 1 | 2 | 3 | 4 | 5 | 6;
+      blocks.push({ type: 'heading', level, children: parseInline(text) });
+      index += 1;
+      continue;
+    }
+
+    if (RULE.test(line)) {
+      blocks.push({ type: 'rule' });
+      index += 1;
+      continue;
+    }
+
+    const item = listMarker(line);
+    if (item && item.indent <= 3) {
+      index = parseList(lines, index, item, depth, blocks);
+      continue;
+    }
+
+    if (BLOCKQUOTE.test(line)) {
+      const quoted: string[] = [];
+      while (index < lines.length) {
+        const match = BLOCKQUOTE.exec(lines[index]!);
+        if (!match) break;
+        quoted.push(match[1]!);
+        index += 1;
+      }
+      blocks.push({ type: 'blockquote', children: parseBlocks(quoted, depth + 1) });
+      continue;
+    }
+
+    const paragraph: MarkdownInline[][] = [parseInline(line.trim())];
+    index += 1;
+    while (index < lines.length && !BLANK.test(lines[index]!) && !startsBlock(lines[index]!)) {
+      paragraph.push(parseInline(lines[index]!.trim()));
+      index += 1;
+    }
+    blocks.push({ type: 'paragraph', lines: paragraph });
+  }
+
+  return blocks;
+}
+
+/**
+ * Reads one list from `start` and returns the index after it.
+ *
+ * Nesting is by indentation, and generous about it: anything indented past the
+ * list's own marker belongs to the current item, whether it lines up with the
+ * item's text or not, because replies indent nested lists by two spaces under a
+ * three-character `1. ` as often as by three.
+ */
+function parseList(lines: string[], start: number, first: ListMarker, depth: number, blocks: MarkdownBlock[]): number {
+  const items: MarkdownBlock[][] = [];
+  let index = start;
+  let marker: ListMarker | null = first;
+
+  while (marker) {
+    const body: string[] = [marker.content];
+    const contentIndent = marker.contentIndent;
+    let openFence: Fence | null = fenceOpen(marker.content);
+    index += 1;
+    marker = null;
+
+    while (index < lines.length) {
+      const line = lines[index]!;
+
+      if (openFence) {
+        const stripped = stripIndent(line, contentIndent);
+        body.push(stripped);
+        if (fenceCloses(stripped, openFence)) openFence = null;
+        index += 1;
+        continue;
+      }
+
+      if (BLANK.test(line)) {
+        let next = index + 1;
+        while (next < lines.length && BLANK.test(lines[next]!)) next += 1;
+        if (next >= lines.length) {
+          index = next;
+          break;
+        }
+        const following = lines[next]!;
+        const sibling = listMarker(following);
+        if (sibling && sibling.indent <= first.indent) {
+          index = next;
+          if (sibling.ordered === first.ordered) marker = sibling;
+          break;
+        }
+        if (leadingSpaces(following) <= first.indent) {
+          index = next;
+          break;
+        }
+        for (let blank = index; blank < next; blank += 1) body.push('');
+        index = next;
+        continue;
+      }
+
+      const nested = listMarker(line);
+      if (nested && nested.indent <= first.indent) {
+        if (nested.ordered === first.ordered) marker = nested;
+        break;
+      }
+
+      if (leadingSpaces(line) > first.indent) {
+        const stripped = stripIndent(line, contentIndent);
+        body.push(stripped);
+        openFence = fenceOpen(stripped);
+        index += 1;
+        continue;
+      }
+
+      if (startsBlock(line)) break;
+
+      // A lazy continuation: prose that wrapped without being indented.
+      body.push(line.trim());
+      index += 1;
+    }
+
+    items.push(parseBlocks(body, depth + 1));
+  }
+
+  blocks.push({ type: 'list', ordered: first.ordered, start: first.number, items });
+  return index;
+}
+
+export function parseInline(text: string): MarkdownInline[] {
+  return parseInlineAt(text, 0);
+}
+
+function isWhitespace(character: string | undefined): boolean {
+  return character === undefined || /\s/.test(character);
+}
+
+function isWordCharacter(character: string | undefined): boolean {
+  return character !== undefined && /[\p{L}\p{N}]/u.test(character);
+}
+
+function runLength(text: string, at: number, character: string): number {
+  let end = at;
+  while (text[end] === character) end += 1;
+  return end - at;
+}
+
+function parseInlineAt(text: string, depth: number): MarkdownInline[] {
+  const nodes: MarkdownInline[] = [];
+  let buffer = '';
+  let index = 0;
+
+  // Searches that found nothing from a position find nothing from any later one,
+  // so a line full of unpartnered markers is read once rather than once per marker.
+  const noCloserFrom = new Map<string, number>();
+
+  const flush = () => {
+    if (buffer) nodes.push({ type: 'text', text: buffer });
+    buffer = '';
+  };
+
+  const push = (node: MarkdownInline) => {
+    flush();
+    nodes.push(node);
+  };
+
+  if (depth > MAX_INLINE_DEPTH) return text ? [{ type: 'text', text }] : [];
+
+  while (index < text.length) {
+    const character = text[index]!;
+
+    if (character === '\\' && index + 1 < text.length && ESCAPABLE.test(text[index + 1]!)) {
+      buffer += text[index + 1];
+      index += 2;
+      continue;
+    }
+
+    if (character === '`') {
+      const length = runLength(text, index, '`');
+      const close = findCodeClose(text, index + length, length, noCloserFrom);
+      if (close === -1) {
+        buffer += text.slice(index, index + length);
+        index += length;
+        continue;
+      }
+      let code = text.slice(index + length, close);
+      if (code.length > 2 && code.startsWith(' ') && code.endsWith(' ') && code.trim() !== '') {
+        code = code.slice(1, -1);
+      }
+      push({ type: 'code', text: code });
+      index = close + length;
+      continue;
+    }
+
+    if (character === '[') {
+      const link = readLink(text, index);
+      if (link) {
+        const children = parseInlineAt(link.label, depth + 1);
+        const href = safeHref(link.url);
+        if (href) {
+          push({ type: 'link', href, children });
+        } else {
+          // A link to anything but the web or mail keeps its words and loses its target.
+          flush();
+          nodes.push(...children);
+        }
+        index = link.end;
+        continue;
+      }
+    }
+
+    if (character === '*' || character === '_') {
+      const length = runLength(text, index, character);
+      const flankedLeft = character === '*' || !isWordCharacter(text[index - 1]);
+
+      if (flankedLeft) {
+        const counts = length >= 2 ? [2, 1] : [1];
+        let matched = false;
+        for (const count of counts) {
+          const contentStart = index + count;
+          if (isWhitespace(text[contentStart])) continue;
+          const close = findEmphasisClose(text, contentStart, character, count, noCloserFrom);
+          if (close === -1) continue;
+          const children = parseInlineAt(text.slice(contentStart, close), depth + 1);
+          push(count === 2 ? { type: 'strong', children } : { type: 'emphasis', children });
+          index = close + count;
+          matched = true;
+          break;
+        }
+        if (matched) continue;
+      }
+
+      buffer += text.slice(index, index + length);
+      index += length;
+      continue;
+    }
+
+    buffer += character;
+    index += 1;
+  }
+
+  flush();
+  return nodes;
+}
+
+function findCodeClose(text: string, from: number, length: number, noCloserFrom: Map<string, number>): number {
+  const key = `\`${length}`;
+  const failed = noCloserFrom.get(key);
+  if (failed !== undefined && from >= failed) return -1;
+
+  let index = from;
+  while (index < text.length) {
+    if (text[index] !== '`') {
+      index += 1;
+      continue;
+    }
+    const run = runLength(text, index, '`');
+    if (run === length) return index;
+    index += run;
+  }
+
+  noCloserFrom.set(key, Math.min(from, failed ?? from));
+  return -1;
+}
+
+/**
+ * The closing delimiter for emphasis opened just before `from`.
+ *
+ * A closer is taken from the end of its run, so `***` can close a strong span
+ * around an emphasised one; a run of exactly two never closes a single `*`,
+ * which keeps `*a **b** c*` from ending at the first pair.
+ */
+function findEmphasisClose(
+  text: string,
+  from: number,
+  character: string,
+  count: number,
+  noCloserFrom: Map<string, number>,
+): number {
+  const key = `${character}${count}`;
+  const failed = noCloserFrom.get(key);
+  if (failed !== undefined && from >= failed) return -1;
+
+  let index = from;
+  while (index < text.length) {
+    const current = text[index]!;
+
+    if (current === '\\') {
+      index += 2;
+      continue;
+    }
+
+    if (current === '`') {
+      const run = runLength(text, index, '`');
+      const close = findCodeClose(text, index + run, run, noCloserFrom);
+      index = close === -1 ? index + run : close + run;
+      continue;
+    }
+
+    if (current !== character) {
+      index += 1;
+      continue;
+    }
+
+    const run = runLength(text, index, character);
+    const runEnd = index + run;
+    const usable = count === 2 ? run >= 2 : run === 1 || run >= 3;
+    if (usable) {
+      const close = runEnd - count;
+      const content = close > from && !isWhitespace(text[close - 1]);
+      const flankedRight = character === '*' || !isWordCharacter(text[runEnd]);
+      if (content && flankedRight) return close;
+    }
+    index = runEnd;
+  }
+
+  noCloserFrom.set(key, Math.min(from, failed ?? from));
+  return -1;
+}
+
+function readLink(text: string, open: number): { label: string; url: string; end: number } | null {
+  let index = open + 1;
+  const labelLimit = Math.min(text.length, open + 1 + MAX_LINK_LABEL);
+  while (index < labelLimit && text[index] !== ']') {
+    index += text[index] === '\\' ? 2 : 1;
+  }
+  if (index >= labelLimit || text[index] !== ']' || text[index + 1] !== '(') return null;
+
+  const label = text.slice(open + 1, index);
+  const urlStart = index + 2;
+  const urlLimit = Math.min(text.length, urlStart + MAX_LINK_URL);
+  let depth = 0;
+  let cursor = urlStart;
+  while (cursor < urlLimit) {
+    const character = text[cursor];
+    if (character === '(') depth += 1;
+    if (character === ')') {
+      if (depth === 0) break;
+      depth -= 1;
+    }
+    cursor += 1;
+  }
+  if (cursor >= urlLimit || text[cursor] !== ')') return null;
+
+  const url = text.slice(urlStart, cursor).trim();
+  if (!label || !url) return null;
+  return { label, url, end: cursor + 1 };
+}
