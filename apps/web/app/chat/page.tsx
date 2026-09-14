@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type ChatMessage, type ChatSession, type Project } from '../../lib/api';
 import { useProjects } from '../../components/shell';
-import { Alert, Badge, Button, Card, Empty, ErrorText, Field } from '../../components/ui';
+import { Alert, Button, Card, Empty, ErrorText, Field } from '../../components/ui';
+import { ChatMessageBubble } from '../../components/chat-message';
 import { DraftTextarea } from '../../components/draft-textarea';
 import { useAction } from '../../components/use-action';
 import { clearDraft, readDraft } from '../../lib/draft-field';
@@ -173,34 +174,7 @@ export default function ChatPage() {
               {view.messages.length === 0 ? (
                 <Empty>Nothing has been said yet.</Empty>
               ) : (
-                view.messages.map((message) => (
-                  <div key={message.id} className={`turn ${message.role}`}>
-                    <div className="row-between">
-                      <span className="meta">{message.role === 'user' ? 'You' : 'Story Builder'}</span>
-                      <span className="row">
-                        {message.status === 'STREAMING' ? <Badge tone="waiting">writing</Badge> : null}
-                        {message.status === 'PENDING' ? <Badge tone="waiting">queued</Badge> : null}
-                        {message.status === 'FAILED' ? <Badge tone="critical">failed</Badge> : null}
-                        <span className="meta">{relativeAge(message.createdAt)}</span>
-                      </span>
-                    </div>
-                    {message.content ? (
-                      <div className="turn-body">{message.content}</div>
-                    ) : message.status === 'PENDING' || message.status === 'STREAMING' ? (
-                      <div className="body-sm">Thinking…</div>
-                    ) : null}
-                    {message.toolCalls.length > 0 ? (
-                      <div className="turn-tools">
-                        {message.toolCalls.slice(0, 16).map((call, index) => (
-                          <span className="tool-chip" key={`${call.name}-${index}`}>
-                            {call.name}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                    {message.error ? <ErrorText>{message.error}</ErrorText> : null}
-                  </div>
-                ))
+                view.messages.map((message) => <ChatMessageBubble key={message.id} message={message} />)
               )}
               <div ref={bottomRef} />
 
