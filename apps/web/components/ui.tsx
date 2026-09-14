@@ -18,6 +18,7 @@ export function Button({
   variant = 'primary',
   size = 'md',
   disabled,
+  pending = false,
   type = 'button',
   title,
 }: {
@@ -26,15 +27,32 @@ export function Button({
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
   size?: 'sm' | 'md';
   disabled?: boolean;
+  /** This button's request is on its way: it shows a spinner and cannot be clicked. */
+  pending?: boolean;
   type?: 'button' | 'submit';
   title?: string;
 }) {
-  const classes = ['btn', variant === 'primary' ? '' : variant, size === 'sm' ? 'sm' : ''].filter(Boolean).join(' ');
+  const classes = ['btn', variant === 'primary' ? '' : variant, size === 'sm' ? 'sm' : '', pending ? 'pending' : '']
+    .filter(Boolean)
+    .join(' ');
   return (
-    <button className={classes} onClick={onClick} disabled={disabled} type={type} title={title}>
+    <button
+      className={classes}
+      onClick={onClick}
+      disabled={disabled || pending}
+      aria-busy={pending || undefined}
+      type={type}
+      title={title}
+    >
+      {pending ? <Spinner /> : null}
       {children}
     </button>
   );
+}
+
+/** A small turning ring in the colour of the text around it. */
+export function Spinner() {
+  return <span className="spinner" aria-hidden="true" />;
 }
 
 export function Card({
@@ -225,7 +243,11 @@ export function Empty({ children }: { children: ReactNode }) {
 }
 
 export function ErrorText({ children }: { children: ReactNode }) {
-  return <p className="error">{children}</p>;
+  return (
+    <p className="error" role="alert">
+      {children}
+    </p>
+  );
 }
 
 export function Tabs<T extends string>({

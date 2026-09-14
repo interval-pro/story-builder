@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, type QueueEntry, type QueueView } from '../../lib/api';
 import { Alert, Button, Card, Empty, ErrorText, StateBadge, Tile } from '../../components/ui';
+import { useAction } from '../../components/use-action';
 import { formatDuration, relativeAge } from '../../lib/format';
 import { jobLabel } from '../../lib/labels';
 
@@ -23,8 +24,9 @@ export default function QueuePage() {
   const [order, setOrder] = useState<string[]>([]);
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  // The poll clears `error`, which is why a failed action is kept apart in `action.error`.
   const [error, setError] = useState<string | null>(null);
+  const action = useAction();
 
   const load = useCallback(async () => {
     try {
@@ -70,32 +72,22 @@ export default function QueuePage() {
     });
   }
 
-  async function commitDrag() {
+  function commitDrag() {
     const ids = order;
     setDragging(null);
     setOver(null);
     if (ids.length === 0) return;
-    setBusy(true);
-    try {
+    void action.run('reorder', 'Reordering the queue', async () => {
       await api.post('/api/queue/reorder', { ids });
       await load();
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
-  async function act(path: string) {
-    setBusy(true);
-    try {
+  function act(key: string, label: string, path: string) {
+    void action.run(key, label, async () => {
       await api.post(path);
       await load();
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   if (!view) return <div className="page">{error ? <ErrorText>{error}</ErrorText> : 'Reading the queue.'}</div>;
@@ -114,11 +106,20 @@ export default function QueuePage() {
         </div>
         <div className="row">
           {paused ? (
-            <Button onClick={() => void act('/api/queue/resume')} disabled={busy}>
+            <Button
+              onClick={() => act('queue:resume', 'Starting the queue', '/api/queue/resume')}
+              disabled={action.busy}
+              pending={action.pending === 'queue:resume'}
+            >
               Start the queue
             </Button>
           ) : (
-            <Button variant="secondary" onClick={() => void act('/api/queue/pause')} disabled={busy}>
+            <Button
+              variant="secondary"
+              onClick={() => act('queue:pause', 'Pausing the queue', '/api/queue/pause')}
+              disabled={action.busy}
+              pending={action.pending === 'queue:pause'}
+            >
               Pause the queue
             </Button>
           )}
@@ -126,6 +127,7 @@ export default function QueuePage() {
       </div>
 
       {error ? <ErrorText>{error}</ErrorText> : null}
+      {action.error ? <ErrorText>{action.error}</ErrorText> : null}
 
       <div className="tiles">
         <Tile value={`${view.policy.runningSlots}/${view.policy.concurrency}`} label="Slots in use" />
@@ -182,11 +184,11 @@ export default function QueuePage() {
                 className={`list-row drag-row ${dragging === entry.id ? 'dragging' : ''} ${
                   over === entry.id ? 'drop-target' : ''
                 } ${entry.heldAt ? 'accent-critical' : 'accent-waiting'}`}
-                draggable={!busy}
+                draggable={!action.busy}
                 onDragStart={() => startDrag(entry.id)}
                 onDragEnter={() => dragOver(entry.id)}
                 onDragOver={(event) => event.preventDefault()}
-                onDragEnd={() => void commitDrag()}
+                onDragEnd={commitDrag}
               >
                 <span className="drag-handle" aria-hidden>
                   ::
@@ -208,16 +210,34 @@ export default function QueuePage() {
                   {entry.heldAt ? (
                     <>
                       <span className="badge critical">Held</span>
-                      <Button size="sm" variant="secondary" onClick={() => void act(`/api/queue/${entry.id}/release`)} disabled={busy}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => act(`release:${entry.id}`, 'Releasing it', `/api/queue/${entry.id}/release`)}
+                        disabled={action.busy}
+                        pending={action.pending === `release:${entry.id}`}
+                      >
                         Release
                       </Button>
                     </>
                   ) : (
-                    <Button size="sm" variant="ghost" onClick={() => void act(`/api/queue/${entry.id}/hold`)} disabled={busy}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => act(`hold:${entry.id}`, 'Holding it', `/api/queue/${entry.id}/hold`)}
+                      disabled={action.busy}
+                      pending={action.pending === `hold:${entry.id}`}
+                    >
                       Hold
                     </Button>
                   )}
-                  <Button size="sm" variant="ghost" onClick={() => void act(`/api/queue/${entry.id}/cancel`)} disabled={busy}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => act(`cancel:${entry.id}`, 'Cancelling it', `/api/queue/${entry.id}/cancel`)}
+                    disabled={action.busy}
+                    pending={action.pending === `cancel:${entry.id}`}
+                  >
                     Cancel
                   </Button>
                 </div>

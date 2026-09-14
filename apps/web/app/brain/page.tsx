@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api';
 import { useProjects } from '../../components/shell';
 import { Badge, Bar, Button, Card, Dialog, Empty, ErrorText, Field } from '../../components/ui';
+import { useAction } from '../../components/use-action';
 
 interface Principle {
   id: string;
@@ -42,8 +43,8 @@ export default function BrainPage() {
   const [principles, setPrinciples] = useState<Principle[]>([]);
   const [invariants, setInvariants] = useState<Invariant[]>([]);
   const [adding, setAdding] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const action = useAction();
   const statementRef = useRef<HTMLInputElement>(null);
   const categoryRef = useRef<HTMLInputElement>(null);
 
@@ -65,25 +66,20 @@ export default function BrainPage() {
     void load();
   }, [load]);
 
-  async function add() {
+  function add() {
     const statement = statementRef.current?.value.trim() ?? '';
     if (statement.length < 10) {
-      setError('A principle needs a sentence.');
+      action.report('A principle needs a sentence.');
       return;
     }
-    setBusy(true);
-    try {
+    void action.run('add', 'Adding the principle', async () => {
       await api.post(`/api/project-brain/principles?projectId=${project?.id}`, {
         statement,
         category: categoryRef.current?.value.trim() || 'general',
       });
       setAdding(false);
       await load();
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   const active = principles.filter((principle) => principle.status === 'ACTIVE');
@@ -104,6 +100,7 @@ export default function BrainPage() {
       </div>
 
       {error ? <ErrorText>{error}</ErrorText> : null}
+      {action.error ? <ErrorText>{action.error}</ErrorText> : null}
 
       {active.length === 0 ? (
         <Empty>
@@ -172,7 +169,7 @@ export default function BrainPage() {
         title="Add a principle"
         footer={
           <>
-            <Button onClick={() => void add()} disabled={busy}>
+            <Button onClick={add} disabled={action.busy} pending={action.pending === 'add'}>
               Add it
             </Button>
             <Button variant="ghost" onClick={() => setAdding(false)}>

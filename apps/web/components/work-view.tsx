@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { Badge, Button, Card, Empty, KeyValue } from './ui';
+import { Badge, Button, Card, Empty, ErrorText, KeyValue } from './ui';
+import { useAction } from './use-action';
 import { formatStamp, relativeAge } from '../lib/format';
 
 interface ToolCall {
@@ -23,7 +24,7 @@ interface Props {
     changes: { filePath: string; changeType: string; insertions: number; deletions: number }[];
     testRuns: { id: string; command: string; exitCode: number; passed: boolean; createdAt: string }[];
   };
-  onAction: () => void;
+  onAction: () => Promise<void>;
 }
 
 /**
@@ -35,7 +36,7 @@ interface Props {
  */
 export function WorkView({ taskId, detail, onAction }: Props) {
   const [toolCalls, setToolCalls] = useState<ToolCall[]>([]);
-  const [busy, setBusy] = useState(false);
+  const action = useAction();
 
   useEffect(() => {
     async function load() {
@@ -51,14 +52,11 @@ export function WorkView({ taskId, detail, onAction }: Props) {
     return () => clearInterval(timer);
   }, [taskId]);
 
-  async function act(path: string) {
-    setBusy(true);
-    try {
+  function act(path: 'pause' | 'resume' | 'stop', label: string) {
+    return action.run(path, label, async () => {
       await api.post(`/api/tasks/${taskId}/${path}`);
-      onAction();
-    } finally {
-      setBusy(false);
-    }
+      await onAction();
+    });
   }
 
   const insertions = detail.changes.reduce((total, change) => total + change.insertions, 0);
@@ -80,17 +78,36 @@ export function WorkView({ taskId, detail, onAction }: Props) {
             ) : null}
           </div>
           <div className="row">
-            <Button size="sm" variant="secondary" onClick={() => void act('pause')} disabled={busy}>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void act('pause', 'Pausing')}
+              disabled={action.busy}
+              pending={action.pending === 'pause'}
+            >
               Pause
             </Button>
-            <Button size="sm" variant="secondary" onClick={() => void act('resume')} disabled={busy}>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void act('resume', 'Resuming')}
+              disabled={action.busy}
+              pending={action.pending === 'resume'}
+            >
               Resume
             </Button>
-            <Button size="sm" variant="danger" onClick={() => void act('stop')} disabled={busy}>
+            <Button
+              size="sm"
+              variant="danger"
+              onClick={() => void act('stop', 'Stopping')}
+              disabled={action.busy}
+              pending={action.pending === 'stop'}
+            >
               Stop
             </Button>
           </div>
         </div>
+        {action.error ? <ErrorText>{action.error}</ErrorText> : null}
       </Card>
 
       <div className="split">

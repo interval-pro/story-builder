@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { useProjects } from '../../components/shell';
 import { Button, Card, Empty, ErrorText, Tile } from '../../components/ui';
+import { useAction } from '../../components/use-action';
 import { relativeAge } from '../../lib/format';
 
 interface Entity {
@@ -39,8 +40,8 @@ export default function KnowledgePage() {
   const [total, setTotal] = useState(0);
   const [kind, setKind] = useState('');
   const [term, setTerm] = useState('');
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const action = useAction();
 
   const load = useCallback(
     async (selectedKind: string) => {
@@ -82,14 +83,9 @@ export default function KnowledgePage() {
     setTotal(result.entities.length);
   }
 
-  async function refresh() {
+  function refresh() {
     if (!project) return;
-    setBusy(true);
-    try {
-      await api.post(`/api/projects/${project.id}/knowledge-refresh`);
-    } finally {
-      setBusy(false);
-    }
+    void action.run('refresh', 'Reading it again', () => api.post(`/api/projects/${project.id}/knowledge-refresh`));
   }
 
   const latest = snapshots[0];
@@ -104,12 +100,18 @@ export default function KnowledgePage() {
             gets a stable picture of it, taken at the commit the story started from.
           </p>
         </div>
-        <Button variant="secondary" onClick={() => void refresh()} disabled={busy || !project}>
+        <Button
+          variant="secondary"
+          onClick={refresh}
+          disabled={action.busy || !project}
+          pending={action.pending === 'refresh'}
+        >
           Read it again
         </Button>
       </div>
 
       {error ? <ErrorText>{error}</ErrorText> : null}
+      {action.error ? <ErrorText>{action.error}</ErrorText> : null}
 
       <div className="tiles">
         <Tile value={total} label="Things found" />

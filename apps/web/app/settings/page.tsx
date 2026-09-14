@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, type SettingDescriptor } from '../../lib/api';
 import { Badge, Button, Card, Empty, ErrorText, Field } from '../../components/ui';
 import { useProjects } from '../../components/shell';
+import { useAction } from '../../components/use-action';
 
 const GROUPS: { key: string; title: string; standfirst: string }[] = [
   {
@@ -59,9 +60,9 @@ export default function SettingsPage() {
   const [scope, setScope] = useState<string>('installation');
   const [settings, setSettings] = useState<SettingDescriptor[]>([]);
   const [edits, setEdits] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const action = useAction();
 
   const perProject = scope !== 'installation';
   const path = perProject ? `/api/projects/${encodeURIComponent(scope)}/settings` : '/api/settings';
@@ -81,26 +82,20 @@ export default function SettingsPage() {
     void load();
   }, [load]);
 
-  async function save() {
+  function save() {
     if (Object.keys(edits).length === 0) return;
-    setBusy(true);
-    try {
+    void action.run('save', 'Saving the settings', async () => {
       const result = await api.put<{ settings: SettingDescriptor[] }>(path, { values: edits });
       setSettings(result.settings);
       setEdits({});
       setSaved(true);
       setError(null);
       setTimeout(() => setSaved(false), 4000);
-    } catch (putError) {
-      setError(putError instanceof Error ? putError.message : String(putError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
-  async function clear(key: string) {
-    setBusy(true);
-    try {
+  function clear(key: string) {
+    void action.run(`clear:${key}`, 'Resetting the setting', async () => {
       const result = await api.delete<{ settings: SettingDescriptor[] }>(`${path}/${encodeURIComponent(key)}`);
       setSettings(result.settings);
       setEdits((current) => {
@@ -108,9 +103,7 @@ export default function SettingsPage() {
         delete next[key];
         return next;
       });
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   function control(setting: SettingDescriptor) {
@@ -189,7 +182,7 @@ export default function SettingsPage() {
           </p>
         </div>
         <div className="row">
-          <Button onClick={() => void save()} disabled={busy || dirty === 0}>
+          <Button onClick={save} disabled={action.busy || dirty === 0} pending={action.pending === 'save'}>
             {dirty === 0 ? 'Nothing to save' : `Save ${dirty} change${dirty === 1 ? '' : 's'}`}
           </Button>
         </div>
@@ -218,6 +211,7 @@ export default function SettingsPage() {
       </div>
 
       {error ? <ErrorText>{error}</ErrorText> : null}
+      {action.error ? <ErrorText>{action.error}</ErrorText> : null}
       {saved ? <span className="meta">Saved.</span> : null}
 
       {settings.length === 0 ? <Empty>Reading the settings.</Empty> : null}
@@ -240,7 +234,13 @@ export default function SettingsPage() {
                       {SOURCE_WORDS[setting.source]}
                     </Badge>
                     {(perProject ? setting.source === 'project' : setting.source === 'stored') ? (
-                      <Button size="sm" variant="ghost" onClick={() => void clear(setting.key)} disabled={busy}>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => clear(setting.key)}
+                        disabled={action.busy}
+                        pending={action.pending === `clear:${setting.key}`}
+                      >
                         {perProject ? 'Use the installation\u2019s' : 'Reset'}
                       </Button>
                     ) : null}

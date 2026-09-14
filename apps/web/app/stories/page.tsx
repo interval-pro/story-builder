@@ -6,6 +6,7 @@ import { api, type IdeaSession, type StoryDraft, type Task } from '../../lib/api
 import { useProjects } from '../../components/shell';
 import { Button, Card, Dialog, Empty, ErrorText, Field, StateBadge, Tile } from '../../components/ui';
 import { DraftTextarea } from '../../components/draft-textarea';
+import { useAction } from '../../components/use-action';
 import { clearDraft, readDraft } from '../../lib/draft-field';
 import { relativeAge } from '../../lib/format';
 import { explainState } from '../../lib/labels';
@@ -43,8 +44,8 @@ export default function StoriesPage() {
   const [filter, setFilter] = useState<Filter>('all');
   const [composing, setComposing] = useState(false);
   const [editing, setEditing] = useState<StoryDraft | null>(null);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const action = useAction();
   const ideaRef = useRef<HTMLTextAreaElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
@@ -82,65 +83,47 @@ export default function StoriesPage() {
     return () => clearInterval(timer);
   }, [load]);
 
-  async function describe() {
+  function describe() {
     const idea = readDraft(ideaRef.current).trim();
     if (idea.length < 10) {
-      setError('Describe the idea in at least a sentence.');
+      action.report('Describe the idea in at least a sentence.');
       return;
     }
-    setBusy(true);
-    try {
+    void action.run('describe', 'Shaping the idea', async () => {
       const result = await api.post<{ sessionId: string }>('/api/ideas', { idea, projectId: project?.id });
       clearDraft(ideaRef.current);
       setComposing(false);
       router.push(`/ideas/${result.sessionId}`);
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
-  async function saveDraft() {
+  function saveDraft() {
     if (!editing) return;
     const title = titleRef.current?.value.trim() ?? '';
     const body = readDraft(bodyRef.current).trim();
     if (!title || body.length < 10) {
-      setError('A story needs a title and at least a sentence of description.');
+      action.report('A story needs a title and at least a sentence of description.');
       return;
     }
-    setBusy(true);
-    try {
+    void action.run('save', 'Saving the draft', async () => {
       await api.put(`/api/drafts/${editing.id}`, { title, body });
       setEditing(null);
       await load();
-    } catch (putError) {
-      setError(putError instanceof Error ? putError.message : String(putError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
-  async function launch(draft: StoryDraft) {
-    setBusy(true);
-    try {
+  function launch(draft: StoryDraft) {
+    void action.run(`launch:${draft.id}`, 'Launching the story', async () => {
       const result = await api.post<{ task: Task }>(`/api/drafts/${draft.id}/launch`);
       router.push(`/tasks/${result.task.id}`);
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
-  async function discard(draft: StoryDraft) {
-    setBusy(true);
-    try {
+  function discard(draft: StoryDraft) {
+    void action.run(`discard:${draft.id}`, 'Discarding the draft', async () => {
       await api.delete(`/api/drafts/${draft.id}`);
       await load();
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   const visible = tasks.filter((task) => matches(filter, task.state));
@@ -165,6 +148,7 @@ export default function StoriesPage() {
       </div>
 
       {error ? <ErrorText>{error}</ErrorText> : null}
+      {action.error ? <ErrorText>{action.error}</ErrorText> : null}
 
       <div className="tiles">
         <Tile value={waiting} label="Waiting for you" tone={waiting > 0 ? 'attention' : undefined} />
@@ -223,13 +207,24 @@ export default function StoriesPage() {
                 </p>
                 {draft.rationale ? <span className="body-sm">Why its own story: {draft.rationale}</span> : null}
                 <div className="row" style={{ marginTop: 'auto' }}>
-                  <Button size="sm" onClick={() => void launch(draft)} disabled={busy}>
+                  <Button
+                    size="sm"
+                    onClick={() => launch(draft)}
+                    disabled={action.busy}
+                    pending={action.pending === `launch:${draft.id}`}
+                  >
                     Launch
                   </Button>
-                  <Button size="sm" variant="secondary" onClick={() => setEditing(draft)} disabled={busy}>
+                  <Button size="sm" variant="secondary" onClick={() => setEditing(draft)} disabled={action.busy}>
                     Edit
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => void discard(draft)} disabled={busy}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => discard(draft)}
+                    disabled={action.busy}
+                    pending={action.pending === `discard:${draft.id}`}
+                  >
                     Discard
                   </Button>
                 </div>
@@ -296,8 +291,8 @@ export default function StoriesPage() {
         title="What should change?"
         footer={
           <>
-            <Button onClick={() => void describe()} disabled={busy}>
-              {busy ? 'Reading the project…' : 'Shape it into stories'}
+            <Button onClick={describe} disabled={action.busy} pending={action.pending === 'describe'}>
+              {action.pending === 'describe' ? 'Reading the project…' : 'Shape it into stories'}
             </Button>
             <Button variant="ghost" onClick={() => setComposing(false)}>
               Cancel
@@ -326,7 +321,7 @@ export default function StoriesPage() {
         title={editing?.title ?? ''}
         footer={
           <>
-            <Button onClick={() => void saveDraft()} disabled={busy}>
+            <Button onClick={saveDraft} disabled={action.busy} pending={action.pending === 'save'}>
               Save
             </Button>
             <Button variant="ghost" onClick={() => setEditing(null)}>

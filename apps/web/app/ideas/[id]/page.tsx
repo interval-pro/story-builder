@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { api, type IdeaQuestion, type IdeaSession, type StoryDraft, type Task } from '../../../lib/api';
-import { Alert, Bar, Button, Card, Empty, ErrorText, Field } from '../../../components/ui';
+import { Alert, Bar, Button, Card, Empty, ErrorText, Field, Spinner } from '../../../components/ui';
+import { useAction } from '../../../components/use-action';
 import { DraftTextarea } from '../../../components/draft-textarea';
 import { clearDraft, readDraft } from '../../../lib/draft-field';
 import { relativeAge } from '../../../lib/format';
@@ -30,8 +31,8 @@ export default function IdeaPage() {
   const [view, setView] = useState<SessionView | null>(null);
   const [index, setIndex] = useState(0);
   const [writingOwn, setWritingOwn] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const action = useAction();
   const ownRef = useRef<HTMLTextAreaElement>(null);
 
   const load = useCallback(async () => {
@@ -58,29 +59,24 @@ export default function IdeaPage() {
     setIndex(next === -1 ? Math.max(0, view.currentRound.length - 1) : next);
   }, [view]);
 
-  async function answer(question: IdeaQuestion, chosenKey: string, customAnswer?: string) {
-    setBusy(true);
-    try {
+  function answerKey(question: IdeaQuestion, chosenKey: string) {
+    return `answer:${question.id}:${chosenKey}`;
+  }
+
+  function answer(question: IdeaQuestion, chosenKey: string, customAnswer?: string) {
+    void action.run(answerKey(question, chosenKey), 'Answering the question', async () => {
       await api.post(`/api/ideas/${sessionId}/answers`, { questionId: question.id, chosenKey, customAnswer });
       setWritingOwn(false);
       clearDraft(ownRef.current);
       await load();
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
-  async function launch(draft: StoryDraft) {
-    setBusy(true);
-    try {
+  function launch(draft: StoryDraft) {
+    void action.run(`launch:${draft.id}`, 'Launching the story', async () => {
       const result = await api.post<{ task: Task }>(`/api/drafts/${draft.id}/launch`);
       router.push(`/tasks/${result.task.id}`);
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-      setBusy(false);
-    }
+    });
   }
 
   if (!view) return <div className="page">{error ? <ErrorText>{error}</ErrorText> : 'Reading the idea.'}</div>;
@@ -102,6 +98,7 @@ export default function IdeaPage() {
       </div>
 
       {error ? <ErrorText>{error}</ErrorText> : null}
+      {action.error ? <ErrorText>{action.error}</ErrorText> : null}
 
       <Card>
         <span className="meta">What you wrote · {relativeAge(session.createdAt)}</span>
@@ -158,17 +155,24 @@ export default function IdeaPage() {
             </div>
 
             <div className="choices" style={{ marginTop: 8 }}>
-              {question.options.map((option) => (
-                <button
-                  key={option.key}
-                  className={`choice ${question.chosenKey === option.key ? 'selected' : ''}`}
-                  onClick={() => void answer(question, option.key)}
-                  disabled={busy || Boolean(question.answeredAt)}
-                >
-                  <span className="choice-label">{option.label}</span>
-                  {option.detail ? <span className="choice-detail">{option.detail}</span> : null}
-                </button>
-              ))}
+              {question.options.map((option) => {
+                const pending = action.pending === answerKey(question, option.key);
+                return (
+                  <button
+                    key={option.key}
+                    className={`choice ${question.chosenKey === option.key ? 'selected' : ''} ${pending ? 'pending' : ''}`}
+                    onClick={() => answer(question, option.key)}
+                    disabled={action.busy || Boolean(question.answeredAt)}
+                    aria-busy={pending || undefined}
+                  >
+                    <span className="choice-label">
+                      {pending ? <Spinner /> : null}
+                      {option.label}
+                    </span>
+                    {option.detail ? <span className="choice-detail">{option.detail}</span> : null}
+                  </button>
+                );
+              })}
 
               {writingOwn ? (
                 <Card tone="plain">
@@ -182,8 +186,9 @@ export default function IdeaPage() {
                   <div className="row">
                     <Button
                       size="sm"
-                      onClick={() => void answer(question, 'custom', readDraft(ownRef.current))}
-                      disabled={busy}
+                      onClick={() => answer(question, 'custom', readDraft(ownRef.current))}
+                      disabled={action.busy}
+                      pending={action.pending === answerKey(question, 'custom')}
                     >
                       Use this answer
                     </Button>
@@ -196,7 +201,7 @@ export default function IdeaPage() {
                 <button
                   className="choice"
                   onClick={() => setWritingOwn(true)}
-                  disabled={busy || Boolean(question.answeredAt)}
+                  disabled={action.busy || Boolean(question.answeredAt)}
                 >
                   <span className="choice-label">Something else</span>
                   <span className="choice-detail">Answer in your own words.</span>
@@ -251,7 +256,12 @@ export default function IdeaPage() {
                       </Button>
                     ) : (
                       <>
-                        <Button size="sm" onClick={() => void launch(draft)} disabled={busy}>
+                        <Button
+                          size="sm"
+                          onClick={() => launch(draft)}
+                          disabled={action.busy}
+                          pending={action.pending === `launch:${draft.id}`}
+                        >
                           Launch this one
                         </Button>
                         <Button size="sm" variant="ghost" onClick={() => router.push('/stories')}>

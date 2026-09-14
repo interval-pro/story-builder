@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type Project } from '../../lib/api';
 import { useProjects } from '../../components/shell';
 import { Alert, Badge, Button, Card, Dialog, Empty, ErrorText, Field, KeyValue } from '../../components/ui';
+import { useAction } from '../../components/use-action';
 import { relativeAge } from '../../lib/format';
 
 const SETUP_TONES: Record<Project['setupState'], 'waiting' | 'running' | 'done' | 'critical'> = {
@@ -47,8 +48,8 @@ export default function ProjectsPage() {
   const [branches, setBranches] = useState<Record<string, string[]>>({});
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<Project | null>(null);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const action = useAction();
   const pathRef = useRef<HTMLInputElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
 
@@ -68,14 +69,13 @@ export default function ProjectsPage() {
     return () => clearInterval(timer);
   }, [load]);
 
-  async function add() {
+  function add() {
     const repoPath = pathRef.current?.value.trim() ?? '';
     if (!repoPath) {
-      setError('Give the absolute path of the repository.');
+      action.report('Give the absolute path of the repository.');
       return;
     }
-    setBusy(true);
-    try {
+    void action.run('add', 'Adding the project', async () => {
       const result = await api.post<{ project: Project }>('/api/projects', {
         repoPath,
         name: nameRef.current?.value.trim() || undefined,
@@ -84,25 +84,16 @@ export default function ProjectsPage() {
       select(result.project.id);
       await load();
       await reload();
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
-  async function remove(project: Project, force: boolean) {
-    setBusy(true);
-    try {
+  function remove(project: Project, force: boolean) {
+    void action.run('remove', 'Removing the project', async () => {
       await api.delete(`/api/projects/${project.id}${force ? '?force=true' : ''}`);
       setRemoving(null);
       await load();
       await reload();
-    } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   /** Loaded when the picker is opened, not for every project on the page. */
@@ -114,29 +105,25 @@ export default function ProjectsPage() {
     setBranches((current) => ({ ...current, [project.id]: result.branches }));
   }
 
-  async function setWorkBranch(project: Project, workBranch: string) {
-    setBusy(true);
-    try {
+  function setWorkBranch(project: Project, workBranch: string) {
+    void action.run(`branch:${project.id}`, 'Changing the work branch', async () => {
       await api.put(`/api/projects/${project.id}`, { workBranch });
       await load();
       await reload();
-    } catch (putError) {
-      setError(putError instanceof Error ? putError.message : String(putError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
-  async function retrySetup(project: Project) {
-    setBusy(true);
-    try {
+  function reread(project: Project) {
+    void action.run(`reread:${project.id}`, 'Reading it again', () =>
+      api.post(`/api/projects/${project.id}/knowledge-refresh`),
+    );
+  }
+
+  function retrySetup(project: Project) {
+    void action.run(`setup:${project.id}`, 'Trying setup again', async () => {
       await api.post(`/api/projects/${project.id}/retry-setup`);
       await load();
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   const work = projects.filter((project) => project.kind === 'PROJECT');
@@ -156,6 +143,7 @@ export default function ProjectsPage() {
       </div>
 
       {error ? <ErrorText>{error}</ErrorText> : null}
+      {action.error ? <ErrorText>{action.error}</ErrorText> : null}
 
       {work.length === 0 ? (
         <Empty>No project yet. Add the directory of a Git repository with at least one commit.</Empty>
@@ -195,9 +183,10 @@ export default function ProjectsPage() {
               >
                 <select
                   value={project.workBranch}
-                  disabled={busy}
+                  disabled={action.busy}
+                  aria-busy={action.pending === `branch:${project.id}` || undefined}
                   onFocus={() => void loadBranches(project)}
-                  onChange={(event) => void setWorkBranch(project, event.target.value)}
+                  onChange={(event) => setWorkBranch(project, event.target.value)}
                 >
                   {(branches[project.id] ?? [project.workBranch]).map((branch) => (
                     <option key={branch} value={branch}>
@@ -231,17 +220,24 @@ export default function ProjectsPage() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => void api.post(`/api/projects/${project.id}/knowledge-refresh`)}
-                  disabled={busy}
+                  onClick={() => reread(project)}
+                  disabled={action.busy}
+                  pending={action.pending === `reread:${project.id}`}
                 >
                   Re-read it
                 </Button>
                 {project.setupState === 'FAILED' ? (
-                  <Button size="sm" variant="ghost" onClick={() => void retrySetup(project)} disabled={busy}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => retrySetup(project)}
+                    disabled={action.busy}
+                    pending={action.pending === `setup:${project.id}`}
+                  >
                     Try setup again
                   </Button>
                 ) : null}
-                <Button size="sm" variant="danger" onClick={() => setRemoving(project)} disabled={busy}>
+                <Button size="sm" variant="danger" onClick={() => setRemoving(project)} disabled={action.busy}>
                   Remove
                 </Button>
               </div>
@@ -276,8 +272,8 @@ export default function ProjectsPage() {
         title="Which repository?"
         footer={
           <>
-            <Button onClick={() => void add()} disabled={busy}>
-              {busy ? 'Checking it…' : 'Add it'}
+            <Button onClick={add} disabled={action.busy} pending={action.pending === 'add'}>
+              {action.pending === 'add' ? 'Checking it…' : 'Add it'}
             </Button>
             <Button variant="ghost" onClick={() => setAdding(false)}>
               Cancel
@@ -305,7 +301,12 @@ export default function ProjectsPage() {
         title={removing?.name ?? ''}
         footer={
           <>
-            <Button variant="danger" onClick={() => removing && void remove(removing, false)} disabled={busy}>
+            <Button
+              variant="danger"
+              onClick={() => removing && remove(removing, false)}
+              disabled={action.busy}
+              pending={action.pending === 'remove'}
+            >
               Remove it
             </Button>
             <Button variant="ghost" onClick={() => setRemoving(null)}>

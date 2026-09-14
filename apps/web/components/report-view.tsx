@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { api, type Task } from '../lib/api';
 import { Button, Card, Empty, ErrorText } from './ui';
+import { useAction } from './use-action';
 
 /**
  * The report, and the one decision that follows it.
@@ -10,10 +11,10 @@ import { Button, Card, Empty, ErrorText } from './ui';
  * Planned against actual is computed rather than narrated, so this is the one
  * document in the system that cannot flatter the work.
  */
-export function ReportView({ taskId, task, onChanged }: { taskId: string; task: Task; onChanged: () => void }) {
+export function ReportView({ taskId, task, onChanged }: { taskId: string; task: Task; onChanged: () => Promise<void> }) {
   const [report, setReport] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const action = useAction();
 
   useEffect(() => {
     async function load() {
@@ -27,21 +28,17 @@ export function ReportView({ taskId, task, onChanged }: { taskId: string; task: 
     void load();
   }, [taskId, task.state]);
 
-  async function approve() {
-    setBusy(true);
-    try {
+  function approve() {
+    void action.run('approve', 'Approving the pull request', async () => {
       await api.post(`/api/tasks/${taskId}/pull-request/approve`);
-      onChanged();
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-    } finally {
-      setBusy(false);
-    }
+      await onChanged();
+    });
   }
 
   return (
     <div className="stack">
       {error ? <ErrorText>{error}</ErrorText> : null}
+      {action.error ? <ErrorText>{action.error}</ErrorText> : null}
 
       {task.state === 'FINAL_REVIEW_READY' ? (
         <Card>
@@ -54,7 +51,7 @@ export function ReportView({ taskId, task, onChanged }: { taskId: string; task: 
                 pushes. Nothing is merged: that stays yours.
               </span>
             </div>
-            <Button onClick={() => void approve()} disabled={busy}>
+            <Button onClick={approve} disabled={action.busy} pending={action.pending === 'approve'}>
               Approve and push
             </Button>
           </div>

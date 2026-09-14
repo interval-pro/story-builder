@@ -204,6 +204,11 @@ textarea:focus-visible,
     opacity: 0.35;
   }
 }
+@keyframes ip-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 .enter {
   animation: ip-fade-up var(--duration-slow) var(--ease-editorial) both;
@@ -215,6 +220,10 @@ textarea:focus-visible,
   *::after {
     animation-duration: 1ms !important;
     transition-duration: 1ms !important;
+  }
+  /* A 1ms infinite spin would flicker; a still, partial ring says the same thing. */
+  .spinner {
+    animation: none !important;
   }
 }
 
@@ -600,6 +609,40 @@ textarea:focus-visible,
 .btn.ghost:disabled {
   background: transparent;
   border-color: var(--line-hairline);
+}
+
+/* The button that was clicked keeps its own look while it waits, with a spinner. */
+.spinner {
+  display: inline-block;
+  flex: none;
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  vertical-align: -0.15em;
+  animation: ip-spin 0.8s linear infinite;
+}
+.btn.pending:disabled {
+  background: var(--action-primary);
+  border-color: transparent;
+  color: var(--ivory-100);
+  cursor: progress;
+}
+.btn.secondary.pending:disabled {
+  background: transparent;
+  border-color: var(--line-strong);
+  color: var(--ivory-100);
+}
+.btn.ghost.pending:disabled {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-accent);
+}
+.btn.danger.pending:disabled {
+  background: transparent;
+  border-color: var(--status-critical);
+  color: var(--ink-critical);
 }
 
 .field {
@@ -1132,6 +1175,14 @@ td.num {
 .choice:disabled {
   cursor: default;
   opacity: 0.6;
+}
+.choice.pending:disabled {
+  cursor: progress;
+  opacity: 1;
+  border-color: var(--line-accent);
+}
+.choice-label .spinner {
+  margin-right: 8px;
 }
 .choice-label {
   font-size: 15.5px;
