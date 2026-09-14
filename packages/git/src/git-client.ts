@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { access } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { AppError } from '@ai-engine/shared';
@@ -287,7 +287,23 @@ export class GitClient {
     };
   }
 
-  /** Files git still considers in conflict: the question "is it resolved yet". */
+  /**
+   * Unmerged files that still contain conflict markers.
+   *
+   * This, not `unmergedPaths`, answers "has the person finished resolving". An
+   * editor removes the markers and nothing else, and git keeps calling the file
+   * unmerged until it is added, so asking git refused someone who was done.
+   */
+  async filesWithConflictMarkers(): Promise<string[]> {
+    const marked: string[] = [];
+    for (const file of await this.unmergedPaths()) {
+      const content = await readFile(path.resolve(this.cwd, file), 'utf8').catch(() => '');
+      if (/^(<{7} |>{7} )/m.test(content)) marked.push(file);
+    }
+    return marked;
+  }
+
+  /** Files git still considers in conflict, whether or not their markers are gone. */
   async unmergedPaths(): Promise<string[]> {
     const result = await this.run(['diff', '--name-only', '--diff-filter=U'], { allowFailure: true });
     return result.stdout.split('\n').filter((line) => line.trim().length > 0);

@@ -257,12 +257,12 @@ export async function handleMergeResolve(context: JobContext): Promise<void> {
  */
 async function continueMerge(context: JobContext): Promise<void> {
   const git = new GitClient(context.project.repoPath);
-  const left = await git.unmergedPaths();
+  const left = await git.filesWithConflictMarkers();
   if (left.length > 0) {
     throw new AppError(
       'conflicts_remain',
       `${left.length} file(s) are still in conflict: ${left.slice(0, 5).join(', ')}. ` +
-        'Resolve them and stage them, then say done again.',
+        'Resolve them, then say done again. There is no need to stage them.',
       409,
       { files: left },
     );

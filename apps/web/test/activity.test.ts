@@ -127,8 +127,11 @@ test('the queue feed is read per task, and a running job wins over a pending one
 
 /**
  * One animation for "the AI is working", not one per page. The pulse may drive
- * the shared indicator and the running progress mark and nothing else, and no
- * second pulsing or blinking animation may appear beside it.
+ * the shared indicator, the running progress mark and the chat's typing dots,
+ * which say the same thing where a reply is being written, and nothing else. No
+ * second pulsing or blinking animation may appear beside it, and a loading
+ * placeholder does not pulse, because a page reading its data is not the AI at
+ * work.
  */
 test('the pulse is used only by the shared indicator and the running step', () => {
   const css = readFileSync(path.join(WEB_ROOT, 'app', 'globals.css'), 'utf8');
@@ -144,7 +147,7 @@ test('the pulse is used only by the shared indicator and the running step', () =
   const users = rules
     .filter((match) => /animation[^;]*ip-pulse/.test(match[2]!))
     .map((match) => match[1]!.trim().replace(/\s+/g, ' '));
-  assert.deepEqual(users.sort(), ['.activity.working', '.step.running .step-mark']);
+  assert.deepEqual(users.sort(), ['.activity.working', '.step.running .step-mark', '.typing-dot']);
 
   const reduced = [...css.matchAll(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{([\s\S]*?\})\s*\}/g)].map(
     (match) => match[1]!,
