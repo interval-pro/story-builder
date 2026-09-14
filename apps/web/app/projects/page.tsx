@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type Project } from '../../lib/api';
 import { useProjects } from '../../components/shell';
-import { Alert, Badge, Button, Card, Dialog, Empty, ErrorText, Field, KeyValue, Loading } from '../../components/ui';
+import { Activity, Alert, Badge, Button, Card, Dialog, Empty, ErrorText, Field, KeyValue, Loading } from '../../components/ui';
 import { useAction } from '../../components/use-action';
 import { loadPhase } from '../../lib/load-state';
+import { setupActivity } from '../../lib/activity';
 import { relativeAge } from '../../lib/format';
 
 const SETUP_TONES: Record<Project['setupState'], 'waiting' | 'running' | 'done' | 'critical'> = {
@@ -159,7 +160,10 @@ export default function ProjectsPage() {
             <Card key={project.id}>
               <div className="row-between">
                 <span className="meta">{project.workBranch}</span>
-                <Badge tone={SETUP_TONES[project.setupState]}>{SETUP_WORDS[project.setupState]}</Badge>
+                <span className="row" style={{ gap: 10 }}>
+                  <Activity kind={setupActivity(project.setupState)} />
+                  <Badge tone={SETUP_TONES[project.setupState]}>{SETUP_WORDS[project.setupState]}</Badge>
+                </span>
               </div>
               <div className="accent-rule" />
               <h2 className="subhead">{project.name}</h2>

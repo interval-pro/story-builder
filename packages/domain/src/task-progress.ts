@@ -1,4 +1,5 @@
 import type { ExecutionPhase } from './capabilities';
+import type { JobStatus } from './job-types';
 import type { QaRun, TaskRun } from './entities';
 import type { TaskState } from './task-state';
 
@@ -11,9 +12,14 @@ import type { TaskState } from './task-state';
  * came back, and the state says which step the task is sitting in now.
  *
  * It is pure, so the cockpit and the tests see the same answer, and it lives in
- * the domain rather than in the cockpit so the CLI can show the same walk.
+ * the domain rather than in the cockpit because the server owns the one
+ * definition of what each step is doing.
+ *
+ * QUEUED is the current step waiting for its job to start. It is kept apart from
+ * RUNNING because a step sitting in the queue and a step an agent is working on
+ * look the same from the state name alone, and they are not the same to a person.
  */
-export type StepStatus = 'PENDING' | 'RUNNING' | 'WAITING' | 'DONE' | 'BLOCKED' | 'FAILED' | 'SKIPPED';
+export type StepStatus = 'PENDING' | 'QUEUED' | 'RUNNING' | 'WAITING' | 'DONE' | 'BLOCKED' | 'FAILED' | 'SKIPPED';
 
 export interface TaskStep {
   key: string;
@@ -172,8 +178,20 @@ export interface ProgressInput {
    * push was being blamed on the checks — the last step that did.
    */
   previousState?: TaskState | null;
+  /**
+   * The status of the task's pending or running job, or null when it has none.
+   *
+   * The state name cannot say whether the work has started: the orchestrator
+   * writes REVIEW_REGENERATING, and on a retry INTEGRATION_VALIDATION and
+   * PUSHING, when it queues the job rather than when a worker picks it up. The
+   * job can. Omitted, the walk falls back to the state name alone.
+   */
+  activeJobStatus?: Extract<JobStatus, 'PENDING' | 'RUNNING'> | null;
   now?: number;
 }
+
+/** States that only ever mean the task is waiting for its turn. */
+const QUEUED_STATES: TaskState[] = ['ANALYSIS_QUEUED', 'IMPLEMENTATION_QUEUED', 'QA_QUEUED', 'WAITING_FOR_TASK'];
 
 /**
  * The step the task is in, by state.
@@ -259,8 +277,13 @@ export function deriveTaskProgress(input: ProgressInput): TaskProgress {
       status = input.state === 'FAILED' ? 'FAILED' : input.state === 'BLOCKED' ? 'BLOCKED' : 'WAITING';
     } else if (spec.humanStates?.includes(input.state)) {
       status = 'WAITING';
-    } else if (runs.some((run) => run.status === 'RUNNING')) {
+    } else if (runs.some((run) => run.status === 'RUNNING') || input.activeJobStatus === 'RUNNING') {
       status = 'RUNNING';
+    } else if (
+      input.activeJobStatus === 'PENDING' ||
+      (!input.activeJobStatus && QUEUED_STATES.includes(input.state))
+    ) {
+      status = 'QUEUED';
     } else if (runs.some((run) => run.status === 'FAILED') && runs.every((run) => run.status !== 'COMPLETED')) {
       status = 'FAILED';
     } else {

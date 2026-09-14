@@ -3,9 +3,10 @@
 import { useMemo } from 'react';
 import type { ChatMessage } from '../lib/api';
 import { relativeAge } from '../lib/format';
+import { chatActivity } from '../lib/activity';
 import { parseMarkdown } from '../lib/markdown';
 import { MarkdownView } from './markdown-view';
-import { Badge, ErrorText } from './ui';
+import { Activity, Badge, ErrorText } from './ui';
 
 /**
  * One message in the chat window, as a bubble.
@@ -27,7 +28,7 @@ export function ChatMessageBubble({ message }: { message: ChatMessage }) {
     body = message.content ? <div className="bubble-text">{message.content}</div> : null;
   } else if (message.content) {
     body = <MarkdownView blocks={blocks} />;
-  } else if (inProgress) {
+  } else if (message.status === 'STREAMING') {
     body = (
       <span className="typing" aria-hidden="true">
         <span className="typing-dot" />
@@ -35,6 +36,10 @@ export function ChatMessageBubble({ message }: { message: ChatMessage }) {
         <span className="typing-dot" />
       </span>
     );
+  } else if (message.status === 'PENDING') {
+    // Queued, not working: the one rule for activity is that only work in
+    // progress moves, so a turn waiting its turn sits still.
+    body = <Activity kind={chatActivity(message.status)} role="status" label="Waiting its turn" />;
   }
 
   return (
@@ -52,8 +57,14 @@ export function ChatMessageBubble({ message }: { message: ChatMessage }) {
           </div>
         ) : null}
         <div className="bubble-meta">
-          {message.status === 'STREAMING' ? <Badge tone="waiting">writing</Badge> : null}
-          {message.status === 'PENDING' ? <Badge tone="waiting">queued</Badge> : null}
+          {inProgress ? (
+            <Badge tone="waiting">
+              <Activity
+                kind={chatActivity(message.status)}
+                label={message.status === 'STREAMING' ? 'writing' : 'queued'}
+              />
+            </Badge>
+          ) : null}
           {message.status === 'FAILED' ? <Badge tone="critical">failed</Badge> : null}
           <span className="meta">{relativeAge(message.createdAt)}</span>
         </div>

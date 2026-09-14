@@ -247,7 +247,7 @@ export interface TaskStep {
   key: string;
   label: string;
   purpose: string;
-  status: 'PENDING' | 'RUNNING' | 'WAITING' | 'DONE' | 'BLOCKED' | 'FAILED' | 'SKIPPED';
+  status: 'PENDING' | 'QUEUED' | 'RUNNING' | 'WAITING' | 'DONE' | 'BLOCKED' | 'FAILED' | 'SKIPPED';
   startedAt: string | null;
   finishedAt: string | null;
   durationMs: number | null;

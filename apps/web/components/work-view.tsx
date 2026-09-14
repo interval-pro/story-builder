@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { Badge, Button, Card, Empty, ErrorText, KeyValue, Loading } from './ui';
+import { Activity, Badge, Button, Card, Empty, ErrorText, KeyValue, Loading } from './ui';
 import { useAction } from './use-action';
+import { jobActivity } from '../lib/activity';
+import { jobLabel } from '../lib/labels';
 import { formatStamp, relativeAge } from '../lib/format';
 import { loadPhase } from '../lib/load-state';
 
@@ -76,9 +78,17 @@ export function WorkView({ taskId, detail, onAction }: Props) {
           <div className="col">
             <span className="meta">Right now</span>
             <span className="list-title">
-              {detail.activeJob
-                ? `${detail.activeJob.jobType.toLowerCase().replace(/_/g, ' ')} · ${detail.activeJob.status.toLowerCase()}`
-                : 'Nothing is running'}
+              {detail.activeJob ? (
+                <Activity
+                  kind={jobActivity(detail.activeJob.status)}
+                  role="status"
+                  label={`${jobLabel(detail.activeJob.jobType)} · ${
+                    detail.activeJob.status === 'RUNNING' ? 'running' : 'waiting its turn'
+                  }`}
+                />
+              ) : (
+                'Nothing is running'
+              )}
             </span>
             {detail.activeJob && detail.activeJob.attempt > 1 ? (
               <span className="meta">attempt {detail.activeJob.attempt}</span>

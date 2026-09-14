@@ -15,6 +15,7 @@ import {
 import { Alert, Button, Card, Empty, ErrorText, Loading, Spinner, StateBadge, Tabs } from '../../../components/ui';
 import { useAction } from '../../../components/use-action';
 import { loadPhase } from '../../../lib/load-state';
+import { taskActivity } from '../../../lib/activity';
 import { StoryProgress } from '../../../components/story-progress';
 import { PlanView } from '../../../components/plan-view';
 import { WorkView } from '../../../components/work-view';
@@ -225,7 +226,12 @@ export default function StoryPage() {
           </div>
           <div className="row" style={{ paddingTop: 6 }}>
             {task.riskLevel ? <span className="badge caution">{task.riskLevel} risk</span> : null}
-            <StateBadge state={task.state} large />
+            <StateBadge
+              state={task.state}
+              large
+              activity={taskActivity(task.state, detail.activeJob?.status ?? null)}
+              activityRole="status"
+            />
           </div>
         </div>
         <p className="standfirst">

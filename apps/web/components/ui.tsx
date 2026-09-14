@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, type ReactNode } from 'react';
+import type { Activity as ActivityKind } from '../lib/activity';
 import { explainState, explainVerdict, type Tone } from '../lib/labels';
 
 /**
@@ -101,6 +102,44 @@ export function Badge({ tone, children }: { tone?: Tone; children: ReactNode }) 
 }
 
 /**
+ * Whether the AI is working on this now, or it is only waiting its turn.
+ *
+ * The one indicator every screen uses, so there is one animation in the product
+ * rather than one per page. A filled dot that pulses means a worker has it; a
+ * hollow ring that does not move means it is queued. The shape carries the
+ * meaning as well as the motion, so it still reads with reduced motion or without
+ * telling the colours apart.
+ *
+ * `role` is img by default, because a list of rows each announcing itself on every
+ * poll is noise. Use status where there is a single instance a person is waiting on.
+ */
+export function Activity({
+  kind,
+  label,
+  role = 'img',
+}: {
+  kind: ActivityKind;
+  label?: ReactNode;
+  role?: 'img' | 'status';
+}) {
+  if (!kind) return label ? <>{label}</> : null;
+  const dot = (
+    <span
+      className={`activity ${kind}`}
+      role={role}
+      aria-label={kind === 'working' ? 'Working' : 'Waiting its turn'}
+    />
+  );
+  if (!label) return dot;
+  return (
+    <span className="activity-labelled">
+      {dot}
+      <span>{label}</span>
+    </span>
+  );
+}
+
+/**
  * A badge that explains itself.
  *
  * The state names in this system are jargon, and the complaint that produced this
@@ -108,11 +147,24 @@ export function Badge({ tone, children }: { tone?: Tone; children: ReactNode }) 
  * the badge rather than in documentation, and answers the two questions a person
  * actually has — what has happened, and what happens next.
  */
-export function StateBadge({ state, large = false }: { state: string; large?: boolean }) {
+export function StateBadge({
+  state,
+  large = false,
+  activity,
+  activityRole,
+}: {
+  state: string;
+  large?: boolean;
+  activity?: ActivityKind;
+  activityRole?: 'img' | 'status';
+}) {
   const explanation = explainState(state);
   return (
     <span className="explained" tabIndex={0}>
-      <span className={`badge ${explanation.tone} ${large ? 'lg' : ''}`}>{explanation.label}</span>
+      <span className={`badge ${explanation.tone} ${large ? 'lg' : ''}`}>
+        {activity ? <Activity kind={activity} role={activityRole} /> : null}
+        {explanation.label}
+      </span>
       <span className="explanation">
         <span className="explanation-title">{explanation.means}</span>
         <span className="explanation-next">{explanation.next}</span>

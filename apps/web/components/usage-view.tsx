@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { api, type TaskUsage } from '../lib/api';
-import { Badge, Card, Empty, Loading, Tile } from './ui';
+import { Activity, Badge, Card, Empty, Loading, Tile } from './ui';
+import { runActivity } from '../lib/activity';
 import { formatDuration, formatStamp, formatTokens, formatTokensExact } from '../lib/format';
 import { loadPhase } from '../lib/load-state';
 
@@ -121,7 +122,11 @@ export function UsageView({ taskId }: { taskId: string }) {
                     <div className="row" style={{ gap: 6 }}>
                       <span>{run.agentType}</span>
                       {run.status === 'FAILED' ? <Badge tone="critical">failed</Badge> : null}
-                      {run.status === 'RUNNING' ? <Badge tone="waiting">running</Badge> : null}
+                      {run.status === 'RUNNING' ? (
+                        <span className="meta">
+                          <Activity kind={runActivity(run.status)} label="running" />
+                        </span>
+                      ) : null}
                       {run.totalTokens === biggest && biggest > 0 ? <Badge tone="caution">largest</Badge> : null}
                     </div>
                     {run.errorMessage ? (

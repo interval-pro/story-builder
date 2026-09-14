@@ -1,12 +1,15 @@
 'use client';
 
 import type { TaskProgress } from '../lib/api';
+import { stepActivity } from '../lib/activity';
 import { formatDuration, formatStamp } from '../lib/format';
-import { Bar, Card } from './ui';
+import { Activity, Bar, Card } from './ui';
 
 const MARKS: Record<string, string> = {
   DONE: '✓',
   RUNNING: '•',
+  // The ring a queued step shows is drawn by the stylesheet, not by a glyph.
+  QUEUED: '',
   WAITING: '?',
   BLOCKED: '!',
   FAILED: '!',
@@ -31,11 +34,17 @@ export function StoryProgress({ progress }: { progress: TaskProgress }) {
         <div className="col">
           <span className="meta">Progress</span>
           <span className="list-title">
-            {current
-              ? `${current.label}${current.needsYou ? ' — waiting for you' : ''}`
-              : progress.percent === 100
-                ? 'Finished'
-                : 'Not started'}
+            <Activity
+              kind={stepActivity(current?.status)}
+              role="status"
+              label={
+                current
+                  ? `${current.label}${current.needsYou ? ' — waiting for you' : current.status === 'QUEUED' ? ' — waiting its turn' : ''}`
+                  : progress.percent === 100
+                    ? 'Finished'
+                    : 'Not started'
+              }
+            />
           </span>
         </div>
         <div className="col" style={{ alignItems: 'flex-end' }}>
@@ -68,9 +77,15 @@ export function StoryProgress({ progress }: { progress: TaskProgress }) {
                 <>
                   {formatStamp(step.startedAt)}
                   <br />
-                  {step.finishedAt ? `${formatStamp(step.finishedAt)} · ` : 'running · '}
+                  {step.status === 'QUEUED'
+                    ? 'waiting its turn · '
+                    : step.finishedAt
+                      ? `${formatStamp(step.finishedAt)} · `
+                      : 'running · '}
                   {formatDuration(step.durationMs)}
                 </>
+              ) : step.status === 'QUEUED' ? (
+                'waiting its turn'
               ) : step.status === 'WAITING' ? (
                 'waiting for you'
               ) : step.status === 'SKIPPED' ? (

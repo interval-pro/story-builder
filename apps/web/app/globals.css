@@ -229,6 +229,16 @@ textarea:focus-visible,
   }
 }
 
+/* The global rule above shortens an infinite animation rather than stopping it,
+   which turns a pulse into a flicker. The working indicators stop instead, and
+   the filled dot against the hollow ring still says which is which. */
+@media (prefers-reduced-motion: reduce) {
+  .activity.working,
+  .step.running .step-mark {
+    animation: none !important;
+  }
+}
+
 /* ---------------------------------------------------------------- structure */
 
 .shell {
@@ -766,6 +776,38 @@ textarea:focus-visible,
   color: var(--text-accent);
 }
 
+/* ---------------------------------------------------------------- activity */
+
+/* The one indicator for "the AI is on this": a filled dot that pulses while a
+   worker has it, a hollow ring that sits still while it is only queued. */
+.activity {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  vertical-align: middle;
+  box-sizing: border-box;
+}
+.activity.working {
+  background: var(--orange-550);
+  animation: ip-pulse 1.6s var(--ease-standard) infinite;
+}
+.activity.queued {
+  background: transparent;
+  border: 1.5px solid var(--text-muted);
+}
+.activity-labelled {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.badge > .activity {
+  margin-right: 7px;
+  position: relative;
+  top: -1px;
+}
+
 /* ------------------------------------------------------------------ badges */
 
 .badge {
@@ -1045,6 +1087,10 @@ textarea:focus-visible,
   background: var(--orange-550);
   color: var(--ivory-100);
   animation: ip-pulse 1.6s var(--ease-standard) infinite;
+}
+.step.queued .step-mark {
+  background: transparent;
+  border: 1.5px solid var(--text-muted);
 }
 .step.waiting .step-mark {
   background: rgba(222, 101, 56, 0.22);
