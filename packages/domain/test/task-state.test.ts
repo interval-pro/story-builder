@@ -153,3 +153,17 @@ test('a retry can continue from the integration it failed in', () => {
   // a diff that has already been checked and approved.
   assert.equal(canTransition('FAILED', 'INTEGRATION_VALIDATION'), true);
 });
+
+test('a conflict found when implementation is about to start can block the task from where it stands', () => {
+  // Implementation starts from two places: straight after the review is
+  // approved, and after a high risk plan is confirmed. Both check for blocking
+  // conflicts with other active stories first and block the task if there are
+  // any. Neither state allowed BLOCKED, so the block threw an illegal
+  // transition: confirming answered 409 and did nothing, and approving left
+  // the task approved, with no job and no way forward.
+  assert.ok(canTransition('REVIEW_APPROVED', 'BLOCKED'));
+  assert.ok(canTransition('HIGH_RISK_CONFIRMATION_REQUIRED', 'BLOCKED'));
+  // And once blocked, it can be sent on to implementation when the other
+  // story is out of the way.
+  assert.ok(canTransition('BLOCKED', 'IMPLEMENTATION_QUEUED'));
+});
