@@ -99,9 +99,10 @@ export default function KnowledgePage() {
     void action.run('refresh', 'Reading it again', () => api.post(`/api/projects/${project.id}/knowledge-refresh`));
   }
 
-  const latest = snapshots[0];
   const phase = loadPhase({ shellLoading, key, loadedFor, error });
   const showData = phase === 'ready' || phase === 'no-project';
+  // Snapshots still hold the last project's values after a failed load, so only read them when they are this key's.
+  const latest = showData ? snapshots[0] : undefined;
   /** A number the page does not have yet is not zero. */
   const known = (value: string | number) => (phase === 'failed' ? '—' : value);
 

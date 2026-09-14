@@ -24,6 +24,7 @@ export function ReportView({ taskId, task, onChanged }: { taskId: string; task: 
         const result = await api.get<{ report: string | null }>(`/api/tasks/${taskId}/final-report`);
         setReport(result.report);
         setLoadedFor(taskId);
+        setError(null);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : String(loadError));
       }
