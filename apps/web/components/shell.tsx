@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { api, type Project, type QueueView } from '../lib/api';
+import { chooseProject } from '../lib/project-choice';
 
 /**
  * Which project the cockpit is looking at.
@@ -117,12 +118,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const workProjects = useMemo(() => projects.filter((project) => project.kind === 'PROJECT'), [projects]);
   const installation = useMemo(() => projects.find((project) => project.kind === 'INSTALLATION') ?? null, [projects]);
 
-  // A remembered project that has since been removed must not leave the cockpit
-  // pointing at nothing, so the choice falls back to the first one that exists.
-  const project = useMemo(
-    () => workProjects.find((candidate) => candidate.id === selected) ?? workProjects[0] ?? installation ?? null,
-    [workProjects, selected, installation],
-  );
+  const project = useMemo(() => chooseProject(projects, selected), [projects, selected]);
 
   const select = useCallback(
     (id: string) => {
