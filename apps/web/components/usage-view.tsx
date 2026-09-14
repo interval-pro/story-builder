@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { api, type TaskUsage } from '../lib/api';
-import { Badge, Card, Empty, Tile } from './ui';
+import { Badge, Card, Empty, Loading, Tile } from './ui';
 import { formatDuration, formatStamp, formatTokens, formatTokensExact } from '../lib/format';
+import { loadPhase } from '../lib/load-state';
 
 /**
  * What this story used, per run.
@@ -18,13 +19,19 @@ import { formatDuration, formatStamp, formatTokens, formatTokensExact } from '..
  */
 export function UsageView({ taskId }: { taskId: string }) {
   const [usage, setUsage] = useState<TaskUsage | null>(null);
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
         setUsage(await api.get<TaskUsage>(`/api/tasks/${taskId}/usage`));
-      } catch {
-        setUsage(null);
+        setLoadedFor(taskId);
+        setError(null);
+      } catch (loadError) {
+        // A failed poll keeps what was read. Clearing it left a failure reading
+        // as loading for as long as the failure lasted.
+        setError(loadError instanceof Error ? loadError.message : String(loadError));
       }
     }
     void load();
@@ -32,7 +39,9 @@ export function UsageView({ taskId }: { taskId: string }) {
     return () => clearInterval(timer);
   }, [taskId]);
 
-  if (!usage) return <Empty>Reading what this story used.</Empty>;
+  const phase = loadPhase({ key: taskId, loadedFor, error });
+  if (phase === 'failed') return <Empty>What this story used could not be read. {error}</Empty>;
+  if (phase === 'loading' || !usage) return <Loading label="Reading what this story used" shape="block" rows={2} />;
 
   const biggest = usage.byRun.reduce((largest, run) => (run.totalTokens > largest ? run.totalTokens : largest), 0);
 

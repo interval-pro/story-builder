@@ -139,15 +139,20 @@ export function Tile({
   label,
   tone,
   onClick,
+  loading = false,
 }: {
   value: ReactNode;
   label: string;
   tone?: 'attention' | 'positive' | 'caution';
   onClick?: () => void;
+  /** Stands in for a number that has not arrived, so a tile never reads 0 before it knows. */
+  loading?: boolean;
 }) {
   return (
     <div className="tile" onClick={onClick} style={onClick ? { cursor: 'pointer' } : undefined}>
-      <div className={`tile-value ${tone ?? ''}`}>{value}</div>
+      <div className={`tile-value ${tone ?? ''}`}>
+        {loading ? <span className="skeleton value" aria-hidden /> : value}
+      </div>
       <div className="tile-label">{label}</div>
     </div>
   );
@@ -240,6 +245,34 @@ export function Field({
 
 export function Empty({ children }: { children: ReactNode }) {
   return <p className="empty">{children}</p>;
+}
+
+/**
+ * Data on its way.
+ *
+ * Shapes the size of what they stand in for, so the page keeps its layout when
+ * the data lands, and a label in the cockpit's own words for anyone who cannot
+ * see them. It replaces only the region that is waiting; headings and anything
+ * that does not need the data render straight away.
+ */
+export function Loading({
+  label,
+  rows = 3,
+  shape = 'row',
+}: {
+  label: string;
+  rows?: number;
+  shape?: 'row' | 'card' | 'block';
+}) {
+  const shapes = Array.from({ length: rows }, (_, index) => (
+    <span key={index} className={`skeleton ${shape}`} aria-hidden />
+  ));
+  return (
+    <div className="loading" role="status" aria-live="polite">
+      <span className="meta">{label}</span>
+      {shape === 'card' ? <div className="grid">{shapes}</div> : shapes}
+    </div>
+  );
 }
 
 export function ErrorText({ children }: { children: ReactNode }) {

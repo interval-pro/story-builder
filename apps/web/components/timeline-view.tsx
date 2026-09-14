@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { Badge, Card, Empty } from './ui';
+import { Badge, Card, Empty, Loading } from './ui';
 import { formatStamp } from '../lib/format';
+import { loadPhase } from '../lib/load-state';
 
 interface SystemEvent {
   eventId: string;
@@ -56,14 +57,20 @@ function describe(event: SystemEvent): string {
 export function TimelineView({ taskId }: { taskId: string }) {
   const [events, setEvents] = useState<SystemEvent[]>([]);
   const [expanded, setExpanded] = useState(false);
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
         const result = await api.get<{ events: SystemEvent[] }>(`/api/tasks/${taskId}/events?limit=300`);
         setEvents(result.events);
-      } catch {
-        setEvents([]);
+        setLoadedFor(taskId);
+        setError(null);
+      } catch (loadError) {
+        // A failed poll keeps the events already read. Clearing them made a
+        // passing network error read as a story with no history at all.
+        setError(loadError instanceof Error ? loadError.message : String(loadError));
       }
     }
     void load();
@@ -71,6 +78,9 @@ export function TimelineView({ taskId }: { taskId: string }) {
     return () => clearInterval(timer);
   }, [taskId]);
 
+  const phase = loadPhase({ key: taskId, loadedFor, error });
+  if (phase === 'loading') return <Loading label="Reading the timeline" rows={4} />;
+  if (phase === 'failed') return <Empty>The timeline could not be read. {error}</Empty>;
   if (events.length === 0) return <Empty>No event has been recorded yet.</Empty>;
 
   // Tool calls are most of the volume and least of the meaning, so they are
