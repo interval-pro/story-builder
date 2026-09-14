@@ -2,6 +2,7 @@ import { newId, NotFoundError } from '@ai-engine/shared';
 import type { IdeaQuestion, IdeaQuestionOption, IdeaSession, IdeaSessionStatus, StoryDraft } from '@ai-engine/domain';
 import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
+import { toJson } from '../sanitize';
 
 const SESSION_COLUMNS = 'id, project_id, idea, status, understanding, round, error, created_at, updated_at';
 const QUESTION_COLUMNS = `id, session_id, round, sequence, question, rationale, options, chosen_key,
@@ -96,7 +97,7 @@ export class IdeaRepository {
          ON CONFLICT (session_id, round, sequence) DO UPDATE
            SET question = $5, rationale = $6, options = $7::jsonb
          RETURNING ${QUESTION_COLUMNS}`,
-        [newId(), sessionId, round, index + 1, question.question, question.rationale, JSON.stringify(question.options)],
+        [newId(), sessionId, round, index + 1, question.question, question.rationale, toJson(question.options)],
       );
       created.push(camelize<IdeaQuestion>(row!));
     }

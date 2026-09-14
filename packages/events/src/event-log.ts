@@ -1,6 +1,6 @@
 import { newId } from '@ai-engine/shared';
 import type { ActorType, EventType, SystemEvent } from '@ai-engine/domain';
-import { camelize, camelizeAll, type Queryable } from '@ai-engine/db';
+import { camelize, camelizeAll, type Queryable, toJson } from '@ai-engine/db';
 
 const COLUMNS = 'event_id, project_id, task_id, run_id, event_type, actor_type, actor_id, payload, sequence, created_at';
 
@@ -33,7 +33,7 @@ export class EventLog {
         input.eventType,
         input.actorType,
         input.actorId,
-        JSON.stringify(input.payload ?? {}),
+        toJson(input.payload ?? {}),
       ],
     );
     return camelize<SystemEvent>(row!);

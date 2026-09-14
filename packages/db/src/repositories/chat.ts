@@ -2,6 +2,7 @@ import { newId, NotFoundError } from '@ai-engine/shared';
 import type { ChatMessage, ChatSession } from '@ai-engine/domain';
 import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
+import { toJson } from '../sanitize';
 
 const SESSION_COLUMNS = `id, project_id, title, engine_session_id, permission_mode, archived_at,
   created_at, updated_at`;
@@ -110,7 +111,7 @@ export class ChatRepository {
         id,
         patch.content ?? null,
         patch.status ?? null,
-        patch.toolCalls ? JSON.stringify(patch.toolCalls) : null,
+        patch.toolCalls ? toJson(patch.toolCalls) : null,
         patch.runId ?? null,
         patch.error ?? null,
       ],

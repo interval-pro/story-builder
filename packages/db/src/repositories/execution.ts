@@ -2,6 +2,7 @@ import { newId } from '@ai-engine/shared';
 import type { Metric, QaFinding, QaNote, QaRun, TestRun } from '@ai-engine/domain';
 import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
+import { toJson } from '../sanitize';
 
 const TEST_COLUMNS = 'id, task_id, run_id, command, exit_code, passed, duration_ms, log_artifact_id, created_at';
 
@@ -75,8 +76,8 @@ export class QaRunRepository {
         input.runId,
         input.iteration,
         input.verdict,
-        JSON.stringify(input.findings),
-        JSON.stringify(input.notes ?? []),
+        toJson(input.findings),
+        toJson(input.notes ?? []),
       ],
     );
     return camelize<QaRun>(row!);
@@ -109,7 +110,7 @@ export class MetricRepository {
   }): Promise<void> {
     await this.db.query(
       'INSERT INTO metrics (id, project_id, task_id, name, value, labels) VALUES ($1, $2, $3, $4, $5, $6)',
-      [newId(), input.projectId, input.taskId ?? null, input.name, input.value, JSON.stringify(input.labels ?? {})],
+      [newId(), input.projectId, input.taskId ?? null, input.name, input.value, toJson(input.labels ?? {})],
     );
   }
 

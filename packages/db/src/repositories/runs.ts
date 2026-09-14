@@ -2,6 +2,7 @@ import { newId, NotFoundError } from '@ai-engine/shared';
 import type { ExecutionPhase, TaskCheckpoint, TaskRun, ToolCall } from '@ai-engine/domain';
 import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
+import { toJson } from '../sanitize';
 
 const RUN_COLUMNS = `id, task_id, project_id, kind, subject_id, phase, agent_type, agent_version_id, status,
   started_at, finished_at, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd,
@@ -121,8 +122,8 @@ export class TaskRunRepository {
         spend?.cacheReadTokens ?? null,
         spend?.cacheCreationTokens ?? null,
         spend?.costUsd ?? null,
-        spend?.modelUsage ? JSON.stringify(spend.modelUsage) : null,
-        spend?.subagentStats ? JSON.stringify(spend.subagentStats) : null,
+        spend?.modelUsage ? toJson(spend.modelUsage) : null,
+        spend?.subagentStats ? toJson(spend.subagentStats) : null,
         spend?.sessionId ?? null,
         spend?.resumed ?? null,
         spend?.effort ?? null,
@@ -160,8 +161,8 @@ export class TaskRunRepository {
         spend?.cacheReadTokens ?? null,
         spend?.cacheCreationTokens ?? null,
         spend?.costUsd ?? null,
-        spend?.modelUsage ? JSON.stringify(spend.modelUsage) : null,
-        spend?.subagentStats ? JSON.stringify(spend.subagentStats) : null,
+        spend?.modelUsage ? toJson(spend.modelUsage) : null,
+        spend?.subagentStats ? toJson(spend.subagentStats) : null,
         spend?.sessionId ?? null,
         spend?.resumed ?? null,
         spend?.effort ?? null,
@@ -287,7 +288,7 @@ export class ToolCallRepository {
         input.runId,
         input.sequence,
         input.toolName,
-        JSON.stringify(input.input),
+        toJson(input.input),
         input.outputSummary.slice(0, 8000),
         input.outputArtifactId ?? null,
         input.status,
@@ -343,10 +344,10 @@ export class CheckpointRepository {
         input.state,
         input.gitHead ?? null,
         input.diffArtifactId ?? null,
-        JSON.stringify(input.workspaceMetadata ?? {}),
-        JSON.stringify(input.migrationState ?? {}),
-        JSON.stringify(input.runningServices ?? []),
-        JSON.stringify(input.agentVersions ?? {}),
+        toJson(input.workspaceMetadata ?? {}),
+        toJson(input.migrationState ?? {}),
+        toJson(input.runningServices ?? []),
+        toJson(input.agentVersions ?? {}),
         input.knowledgeSnapshotId ?? null,
         input.planPosition ?? 0,
       ],

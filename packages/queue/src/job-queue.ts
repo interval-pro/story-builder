@@ -1,6 +1,6 @@
 import { backoffMs, newId, NotFoundError } from '@ai-engine/shared';
 import { consumesAgentSlot, holdsProjectDirectory, type Job, type JobType, type QueueEntry } from '@ai-engine/domain';
-import { camelize, camelizeAll, type Queryable } from '@ai-engine/db';
+import { camelize, camelizeAll, type Queryable, toJson } from '@ai-engine/db';
 
 const COLUMNS = `id, task_id, project_id, job_type, payload, status, attempt, max_attempts, available_at,
   locked_by, locked_at, last_error, created_at, completed_at, position, consumes_slot, held_at`;
@@ -76,7 +76,7 @@ export class JobQueue {
         input.taskId,
         input.projectId ?? null,
         input.jobType,
-        JSON.stringify(input.payload ?? {}),
+        toJson(input.payload ?? {}),
         input.availableAt ?? null,
         input.maxAttempts ?? null,
         consumesAgentSlot(input.jobType),
