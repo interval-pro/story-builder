@@ -2,8 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { Badge, Button, Card, Empty, KeyValue } from './ui';
+import { Activity, Badge, Button, Card, Empty, ErrorText, KeyValue, Loading } from './ui';
+import { useAction } from './use-action';
+import { jobActivity } from '../lib/activity';
+import { jobLabel } from '../lib/labels';
 import { formatStamp, relativeAge } from '../lib/format';
+import { loadPhase } from '../lib/load-state';
 
 interface ToolCall {
   id: string;
@@ -23,7 +27,7 @@ interface Props {
     changes: { filePath: string; changeType: string; insertions: number; deletions: number }[];
     testRuns: { id: string; command: string; exitCode: number; passed: boolean; createdAt: string }[];
   };
-  onAction: () => void;
+  onAction: () => Promise<void>;
 }
 
 /**
@@ -35,15 +39,20 @@ interface Props {
  */
 export function WorkView({ taskId, detail, onAction }: Props) {
   const [toolCalls, setToolCalls] = useState<ToolCall[]>([]);
-  const [busy, setBusy] = useState(false);
+  const action = useAction();
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
         const result = await api.get<{ toolCalls: ToolCall[] }>(`/api/tasks/${taskId}/tool-calls?limit=30`);
         setToolCalls(result.toolCalls);
-      } catch {
-        setToolCalls([]);
+        setLoadedFor(taskId);
+        setError(null);
+      } catch (loadError) {
+        // A failed poll keeps the calls already read rather than claiming none were made.
+        setError(loadError instanceof Error ? loadError.message : String(loadError));
       }
     }
     void load();
@@ -51,18 +60,16 @@ export function WorkView({ taskId, detail, onAction }: Props) {
     return () => clearInterval(timer);
   }, [taskId]);
 
-  async function act(path: string) {
-    setBusy(true);
-    try {
+  function act(path: 'pause' | 'resume' | 'stop', label: string) {
+    return action.run(path, label, async () => {
       await api.post(`/api/tasks/${taskId}/${path}`);
-      onAction();
-    } finally {
-      setBusy(false);
-    }
+      await onAction();
+    });
   }
 
   const insertions = detail.changes.reduce((total, change) => total + change.insertions, 0);
   const deletions = detail.changes.reduce((total, change) => total + change.deletions, 0);
+  const phase = loadPhase({ key: taskId, loadedFor, error });
 
   return (
     <div className="stack">
@@ -71,26 +78,53 @@ export function WorkView({ taskId, detail, onAction }: Props) {
           <div className="col">
             <span className="meta">Right now</span>
             <span className="list-title">
-              {detail.activeJob
-                ? `${detail.activeJob.jobType.toLowerCase().replace(/_/g, ' ')} · ${detail.activeJob.status.toLowerCase()}`
-                : 'Nothing is running'}
+              {detail.activeJob ? (
+                <Activity
+                  kind={jobActivity(detail.activeJob.status)}
+                  role="status"
+                  label={`${jobLabel(detail.activeJob.jobType)} · ${
+                    detail.activeJob.status === 'RUNNING' ? 'running' : 'waiting its turn'
+                  }`}
+                />
+              ) : (
+                'Nothing is running'
+              )}
             </span>
             {detail.activeJob && detail.activeJob.attempt > 1 ? (
               <span className="meta">attempt {detail.activeJob.attempt}</span>
             ) : null}
           </div>
           <div className="row">
-            <Button size="sm" variant="secondary" onClick={() => void act('pause')} disabled={busy}>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void act('pause', 'Pausing')}
+              disabled={action.busy}
+              pending={action.pending === 'pause'}
+            >
               Pause
             </Button>
-            <Button size="sm" variant="secondary" onClick={() => void act('resume')} disabled={busy}>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void act('resume', 'Resuming')}
+              disabled={action.busy}
+              pending={action.pending === 'resume'}
+            >
               Resume
             </Button>
-            <Button size="sm" variant="danger" onClick={() => void act('stop')} disabled={busy}>
+            <Button
+              size="sm"
+              variant="danger"
+              onClick={() => void act('stop', 'Stopping')}
+              disabled={action.busy}
+              pending={action.pending === 'stop'}
+            >
               Stop
             </Button>
           </div>
         </div>
+        {action.error ? <ErrorText>{action.error}</ErrorText> : null}
       </Card>
 
       <div className="split">
@@ -132,7 +166,11 @@ export function WorkView({ taskId, detail, onAction }: Props) {
 
           <Card>
             <span className="meta">Latest tool activity</span>
-            {toolCalls.length === 0 ? (
+            {phase === 'loading' ? (
+              <Loading label="Reading the tool activity" rows={2} />
+            ) : phase === 'failed' ? (
+              <Empty>The tool activity could not be read. {error}</Empty>
+            ) : toolCalls.length === 0 ? (
               <Empty>No tool has been called yet. This fills in while an agent works.</Empty>
             ) : (
               <div className="log">

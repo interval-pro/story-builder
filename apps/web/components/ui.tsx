@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, type ReactNode } from 'react';
+import type { Activity as ActivityKind } from '../lib/activity';
 import { explainState, explainVerdict, type Tone } from '../lib/labels';
 
 /**
@@ -18,6 +19,7 @@ export function Button({
   variant = 'primary',
   size = 'md',
   disabled,
+  pending = false,
   type = 'button',
   title,
 }: {
@@ -26,15 +28,32 @@ export function Button({
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
   size?: 'sm' | 'md';
   disabled?: boolean;
+  /** This button's request is on its way: it shows a spinner and cannot be clicked. */
+  pending?: boolean;
   type?: 'button' | 'submit';
   title?: string;
 }) {
-  const classes = ['btn', variant === 'primary' ? '' : variant, size === 'sm' ? 'sm' : ''].filter(Boolean).join(' ');
+  const classes = ['btn', variant === 'primary' ? '' : variant, size === 'sm' ? 'sm' : '', pending ? 'pending' : '']
+    .filter(Boolean)
+    .join(' ');
   return (
-    <button className={classes} onClick={onClick} disabled={disabled} type={type} title={title}>
+    <button
+      className={classes}
+      onClick={onClick}
+      disabled={disabled || pending}
+      aria-busy={pending || undefined}
+      type={type}
+      title={title}
+    >
+      {pending ? <Spinner /> : null}
       {children}
     </button>
   );
+}
+
+/** A small turning ring in the colour of the text around it. */
+export function Spinner() {
+  return <span className="spinner" aria-hidden="true" />;
 }
 
 export function Card({
@@ -83,6 +102,44 @@ export function Badge({ tone, children }: { tone?: Tone; children: ReactNode }) 
 }
 
 /**
+ * Whether the AI is working on this now, or it is only waiting its turn.
+ *
+ * The one indicator every screen uses, so there is one animation in the product
+ * rather than one per page. A filled dot that pulses means a worker has it; a
+ * hollow ring that does not move means it is queued. The shape carries the
+ * meaning as well as the motion, so it still reads with reduced motion or without
+ * telling the colours apart.
+ *
+ * `role` is img by default, because a list of rows each announcing itself on every
+ * poll is noise. Use status where there is a single instance a person is waiting on.
+ */
+export function Activity({
+  kind,
+  label,
+  role = 'img',
+}: {
+  kind: ActivityKind;
+  label?: ReactNode;
+  role?: 'img' | 'status';
+}) {
+  if (!kind) return label ? <>{label}</> : null;
+  const dot = (
+    <span
+      className={`activity ${kind}`}
+      role={role}
+      aria-label={kind === 'working' ? 'Working' : 'Waiting its turn'}
+    />
+  );
+  if (!label) return dot;
+  return (
+    <span className="activity-labelled">
+      {dot}
+      <span>{label}</span>
+    </span>
+  );
+}
+
+/**
  * A badge that explains itself.
  *
  * The state names in this system are jargon, and the complaint that produced this
@@ -90,11 +147,24 @@ export function Badge({ tone, children }: { tone?: Tone; children: ReactNode }) 
  * the badge rather than in documentation, and answers the two questions a person
  * actually has — what has happened, and what happens next.
  */
-export function StateBadge({ state, large = false }: { state: string; large?: boolean }) {
+export function StateBadge({
+  state,
+  large = false,
+  activity,
+  activityRole,
+}: {
+  state: string;
+  large?: boolean;
+  activity?: ActivityKind;
+  activityRole?: 'img' | 'status';
+}) {
   const explanation = explainState(state);
   return (
     <span className="explained" tabIndex={0}>
-      <span className={`badge ${explanation.tone} ${large ? 'lg' : ''}`}>{explanation.label}</span>
+      <span className={`badge ${explanation.tone} ${large ? 'lg' : ''}`}>
+        {activity ? <Activity kind={activity} role={activityRole} /> : null}
+        {explanation.label}
+      </span>
       <span className="explanation">
         <span className="explanation-title">{explanation.means}</span>
         <span className="explanation-next">{explanation.next}</span>
@@ -121,15 +191,20 @@ export function Tile({
   label,
   tone,
   onClick,
+  loading = false,
 }: {
   value: ReactNode;
   label: string;
   tone?: 'attention' | 'positive' | 'caution';
   onClick?: () => void;
+  /** Stands in for a number that has not arrived, so a tile never reads 0 before it knows. */
+  loading?: boolean;
 }) {
   return (
     <div className="tile" onClick={onClick} style={onClick ? { cursor: 'pointer' } : undefined}>
-      <div className={`tile-value ${tone ?? ''}`}>{value}</div>
+      <div className={`tile-value ${tone ?? ''}`}>
+        {loading ? <span className="skeleton value" aria-hidden /> : value}
+      </div>
       <div className="tile-label">{label}</div>
     </div>
   );
@@ -224,8 +299,40 @@ export function Empty({ children }: { children: ReactNode }) {
   return <p className="empty">{children}</p>;
 }
 
+/**
+ * Data on its way.
+ *
+ * Shapes the size of what they stand in for, so the page keeps its layout when
+ * the data lands, and a label in the cockpit's own words for anyone who cannot
+ * see them. It replaces only the region that is waiting; headings and anything
+ * that does not need the data render straight away.
+ */
+export function Loading({
+  label,
+  rows = 3,
+  shape = 'row',
+}: {
+  label: string;
+  rows?: number;
+  shape?: 'row' | 'card' | 'block';
+}) {
+  const shapes = Array.from({ length: rows }, (_, index) => (
+    <span key={index} className={`skeleton ${shape}`} aria-hidden />
+  ));
+  return (
+    <div className="loading" role="status" aria-live="polite">
+      <span className="meta">{label}</span>
+      {shape === 'card' ? <div className="grid">{shapes}</div> : shapes}
+    </div>
+  );
+}
+
 export function ErrorText({ children }: { children: ReactNode }) {
-  return <p className="error">{children}</p>;
+  return (
+    <p className="error" role="alert">
+      {children}
+    </p>
+  );
 }
 
 export function Tabs<T extends string>({

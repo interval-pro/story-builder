@@ -8,7 +8,8 @@ import {
   type ReviewVersion,
   type SectionDiff,
 } from '../lib/api';
-import { Alert, Badge, Button, Card, Empty, ErrorText, Field } from '../components/ui';
+import { Alert, Badge, Button, Card, Empty, ErrorText, Field, Spinner } from '../components/ui';
+import { useAction } from './use-action';
 import { DraftTextarea } from './draft-textarea';
 import { clearDraft, readDraft } from '../lib/draft-field';
 import { formatStamp } from '../lib/format';
@@ -21,7 +22,7 @@ interface Props {
   diff: SectionDiff[];
   decisions: Decision[];
   canAct: boolean;
-  onChanged: () => void;
+  onChanged: () => Promise<void>;
 }
 
 /**
@@ -36,8 +37,7 @@ export function PlanView({ taskId, reviewId, version, notes, diff, decisions, ca
   const [full, setFull] = useState(false);
   const [selection, setSelection] = useState<{ text: string; sectionKey: string | null } | null>(null);
   const [writingOwn, setWritingOwn] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const action = useAction();
   const noteRef = useRef<HTMLTextAreaElement>(null);
   const ownRef = useRef<HTMLTextAreaElement>(null);
   // The note card unmounts on Cancel, so the element takes its text with it.
@@ -55,15 +55,14 @@ export function PlanView({ taskId, reviewId, version, notes, diff, decisions, ca
     if (text.trim().length > 0) setSelection({ text: text.trim(), sectionKey });
   }
 
-  async function addNote() {
+  function addNote() {
     if (!selection) return;
     const text = readDraft(noteRef.current).trim();
     if (!text) {
-      setError('A note needs some text.');
+      action.report('A note needs some text.');
       return;
     }
-    setBusy(true);
-    try {
+    void action.run('note', 'Adding the note', async () => {
       await api.post(`/api/tasks/${taskId}/review/notes`, {
         reviewId,
         reviewVersionId: version.id,
@@ -76,45 +75,32 @@ export function PlanView({ taskId, reviewId, version, notes, diff, decisions, ca
       clearDraft(noteRef.current);
       retainedNote.current = '';
       setSelection(null);
-      setError(null);
-      onChanged();
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-    } finally {
-      setBusy(false);
-    }
+      await onChanged();
+    });
   }
 
-  async function answer(decision: Decision, chosenKey: string, customAnswer?: string) {
-    setBusy(true);
-    try {
+  function answerKey(decision: Decision, chosenKey: string) {
+    return `decision:${decision.key}:${chosenKey}`;
+  }
+
+  function answer(decision: Decision, chosenKey: string, customAnswer?: string) {
+    void action.run(answerKey(decision, chosenKey), 'Answering the decision', async () => {
       await api.post(`/api/tasks/${taskId}/decisions/${decision.key}`, { chosenKey, customAnswer });
       setWritingOwn(null);
-      setError(null);
-      onChanged();
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-    } finally {
-      setBusy(false);
-    }
+      await onChanged();
+    });
   }
 
-  async function act(path: string) {
-    setBusy(true);
-    try {
-      await api.post(`/api/tasks/${taskId}/${path}`);
-      setError(null);
-      onChanged();
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-    } finally {
-      setBusy(false);
-    }
+  function act(key: 'approve' | 'regenerate', label: string) {
+    void action.run(key, label, async () => {
+      await api.post(`/api/tasks/${taskId}/review/${key}`);
+      await onChanged();
+    });
   }
 
   return (
     <div className="stack">
-      {error ? <ErrorText>{error}</ErrorText> : null}
+      {action.error ? <ErrorText>{action.error}</ErrorText> : null}
 
       {openBlocking.length > 0 && canAct ? (
         <Alert tone="caution" title="Decisions first">
@@ -173,13 +159,18 @@ export function PlanView({ taskId, reviewId, version, notes, diff, decisions, ca
 
         {canAct ? (
           <div className="row" style={{ borderTop: '1px solid var(--line-hairline)', paddingTop: 18, marginTop: 8 }}>
-            <Button onClick={() => void act('review/approve')} disabled={busy || openBlocking.length > 0}>
+            <Button
+              onClick={() => act('approve', 'Approving the plan')}
+              disabled={action.busy || openBlocking.length > 0}
+              pending={action.pending === 'approve'}
+            >
               Approve the plan
             </Button>
             <Button
               variant="secondary"
-              onClick={() => void act('review/regenerate')}
-              disabled={busy || openNotes.length === 0}
+              onClick={() => act('regenerate', 'Rewriting the plan')}
+              disabled={action.busy || openNotes.length === 0}
+              pending={action.pending === 'regenerate'}
             >
               Rewrite with {openNotes.length} note{openNotes.length === 1 ? '' : 's'}
             </Button>
@@ -223,21 +214,28 @@ export function PlanView({ taskId, reviewId, version, notes, diff, decisions, ca
                   </div>
                 ) : (
                   <div className="choices">
-                    {decision.options.map((option) => (
-                      <button
-                        key={option.key}
-                        className="choice"
-                        onClick={() => void answer(decision, option.key)}
-                        disabled={busy || !canAct}
-                      >
-                        {option.recommended ? <span className="choice-recommended">Recommended</span> : null}
-                        <span className="choice-label">{option.label}</span>
-                        {option.detail ? <span className="choice-detail">{option.detail}</span> : null}
-                        {option.consequence ? (
-                          <span className="choice-consequence">Costs: {option.consequence}</span>
-                        ) : null}
-                      </button>
-                    ))}
+                    {decision.options.map((option) => {
+                      const pending = action.pending === answerKey(decision, option.key);
+                      return (
+                        <button
+                          key={option.key}
+                          className={`choice ${pending ? 'pending' : ''}`}
+                          onClick={() => answer(decision, option.key)}
+                          disabled={action.busy || !canAct}
+                          aria-busy={pending || undefined}
+                        >
+                          {option.recommended ? <span className="choice-recommended">Recommended</span> : null}
+                          <span className="choice-label">
+                            {pending ? <Spinner /> : null}
+                            {option.label}
+                          </span>
+                          {option.detail ? <span className="choice-detail">{option.detail}</span> : null}
+                          {option.consequence ? (
+                            <span className="choice-consequence">Costs: {option.consequence}</span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
 
                     {writingOwn === decision.key ? (
                       <Card tone="plain">
@@ -251,8 +249,9 @@ export function PlanView({ taskId, reviewId, version, notes, diff, decisions, ca
                         <div className="row">
                           <Button
                             size="sm"
-                            onClick={() => void answer(decision, 'custom', readDraft(ownRef.current))}
-                            disabled={busy}
+                            onClick={() => answer(decision, 'custom', readDraft(ownRef.current))}
+                            disabled={action.busy}
+                            pending={action.pending === answerKey(decision, 'custom')}
                           >
                             Use this
                           </Button>
@@ -262,14 +261,26 @@ export function PlanView({ taskId, reviewId, version, notes, diff, decisions, ca
                         </div>
                       </Card>
                     ) : (
-                      <button className="choice" onClick={() => setWritingOwn(decision.key)} disabled={busy || !canAct}>
+                      <button
+                        className="choice"
+                        onClick={() => setWritingOwn(decision.key)}
+                        disabled={action.busy || !canAct}
+                      >
                         <span className="choice-label">I will say how</span>
                         <span className="choice-detail">Describe the resolution in your own words.</span>
                       </button>
                     )}
 
-                    <button className="choice" onClick={() => void answer(decision, 'agent')} disabled={busy || !canAct}>
-                      <span className="choice-label">Whatever you judge best</span>
+                    <button
+                      className={`choice ${action.pending === answerKey(decision, 'agent') ? 'pending' : ''}`}
+                      onClick={() => answer(decision, 'agent')}
+                      disabled={action.busy || !canAct}
+                      aria-busy={action.pending === answerKey(decision, 'agent') || undefined}
+                    >
+                      <span className="choice-label">
+                        {action.pending === answerKey(decision, 'agent') ? <Spinner /> : null}
+                        Whatever you judge best
+                      </span>
                       <span className="choice-detail">
                         The engineer chooses, knowing the options above and their consequences.
                       </span>
@@ -319,7 +330,7 @@ export function PlanView({ taskId, reviewId, version, notes, diff, decisions, ca
             />
           </Field>
           <div className="row">
-            <Button size="sm" onClick={() => void addNote()} disabled={busy}>
+            <Button size="sm" onClick={addNote} disabled={action.busy} pending={action.pending === 'note'}>
               Add the note
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setSelection(null)}>

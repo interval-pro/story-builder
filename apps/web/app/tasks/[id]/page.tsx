@@ -12,7 +12,10 @@ import {
   type Task,
   type TaskProgress,
 } from '../../../lib/api';
-import { Alert, Button, Card, Empty, ErrorText, StateBadge, Tabs } from '../../../components/ui';
+import { Alert, Button, Card, Empty, ErrorText, Loading, Spinner, StateBadge, Tabs } from '../../../components/ui';
+import { useAction } from '../../../components/use-action';
+import { loadPhase } from '../../../lib/load-state';
+import { taskActivity } from '../../../lib/activity';
 import { StoryProgress } from '../../../components/story-progress';
 import { PlanView } from '../../../components/plan-view';
 import { WorkView } from '../../../components/work-view';
@@ -98,10 +101,13 @@ export default function StoryPage() {
   const [progress, setProgress] = useState<TaskProgress | null>(null);
   const [tab, setTab] = useState<Tab>('overview');
   const [tabPinned, setTabPinned] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [applying, setApplying] = useState(false);
   const [unreachable, setUnreachable] = useState(false);
+  // Why the page could not be read. The poll clears it; a failed action lives
+  // in `action.error` instead, so the next poll cannot erase it before it is read.
   const [error, setError] = useState<string | null>(null);
+  const action = useAction();
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -113,6 +119,7 @@ export default function StoryPage() {
       setDetail(detailResult);
       setReview(reviewResult);
       setProgress(progressResult.progress);
+      setLoadedFor(taskId);
       setError(null);
       setUnreachable(false);
     } catch (loadError) {
@@ -150,16 +157,11 @@ export default function StoryPage() {
     else setTab('overview');
   }, [detail, tabPinned]);
 
-  async function act(path: string, body: Record<string, unknown> = {}) {
-    setBusy(true);
-    try {
+  function act(key: string, label: string, path: string, body: Record<string, unknown> = {}) {
+    void action.run(key, label, async () => {
       await api.post(`/api/tasks/${taskId}/${path}`, body);
       await load();
-    } catch (actError) {
-      setError(actError instanceof Error ? actError.message : String(actError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function applyCandidate() {
@@ -180,8 +182,21 @@ export default function StoryPage() {
     }
   }
 
-  if (error && !detail) return <div className="page"><ErrorText>{error}</ErrorText></div>;
-  if (!detail) return <div className="page">Reading this story.</div>;
+  const phase = loadPhase({ key: taskId, loadedFor, error });
+  if (phase !== 'ready' || !detail) {
+    return (
+      <div className="page enter">
+        <span
+          className="meta"
+          onClick={() => router.push('/stories')}
+          style={{ cursor: 'pointer', color: 'var(--text-accent)' }}
+        >
+          ← All stories
+        </span>
+        {phase === 'failed' ? <ErrorText>{error}</ErrorText> : <Loading label="Reading this story" shape="block" rows={2} />}
+      </div>
+    );
+  }
 
   const { task } = detail;
   const explanation = explainState(task.state);
@@ -211,7 +226,12 @@ export default function StoryPage() {
           </div>
           <div className="row" style={{ paddingTop: 6 }}>
             {task.riskLevel ? <span className="badge caution">{task.riskLevel} risk</span> : null}
-            <StateBadge state={task.state} large />
+            <StateBadge
+              state={task.state}
+              large
+              activity={taskActivity(task.state, detail.activeJob?.status ?? null)}
+              activityRole="status"
+            />
           </div>
         </div>
         <p className="standfirst">
@@ -220,6 +240,7 @@ export default function StoryPage() {
       </div>
 
       {error ? <ErrorText>{error}</ErrorText> : null}
+      {action.error ? <ErrorText>{action.error}</ErrorText> : null}
 
       {task.blockedReason ? (
         <Card>
@@ -238,27 +259,45 @@ export default function StoryPage() {
               </div>
               {decision.detail ? <span className="body-sm">{decision.detail}</span> : null}
               <div className="choices">
-                {decision.options.map((option) => (
-                  <button
-                    key={option.key}
-                    className="choice"
-                    onClick={() => void act(`decisions/${decision.key}`, { chosenKey: option.key })}
-                    disabled={busy}
-                  >
-                    {option.recommended ? <span className="choice-recommended">Recommended</span> : null}
-                    <span className="choice-label">{option.label}</span>
-                    {option.detail ? <span className="choice-detail">{option.detail}</span> : null}
-                    {option.consequence ? (
-                      <span className="choice-consequence">Costs: {option.consequence}</span>
-                    ) : null}
-                  </button>
-                ))}
+                {decision.options.map((option) => {
+                  const key = `decision:${decision.key}:${option.key}`;
+                  const pending = action.pending === key;
+                  return (
+                    <button
+                      key={option.key}
+                      className={`choice ${pending ? 'pending' : ''}`}
+                      onClick={() =>
+                        act(key, 'Answering the decision', `decisions/${decision.key}`, { chosenKey: option.key })
+                      }
+                      disabled={action.busy}
+                      aria-busy={pending || undefined}
+                    >
+                      {option.recommended ? <span className="choice-recommended">Recommended</span> : null}
+                      <span className="choice-label">
+                        {pending ? <Spinner /> : null}
+                        {option.label}
+                      </span>
+                      {option.detail ? <span className="choice-detail">{option.detail}</span> : null}
+                      {option.consequence ? (
+                        <span className="choice-consequence">Costs: {option.consequence}</span>
+                      ) : null}
+                    </button>
+                  );
+                })}
                 <button
-                  className="choice"
-                  onClick={() => void act(`decisions/${decision.key}`, { chosenKey: 'agent' })}
-                  disabled={busy}
+                  className={`choice ${action.pending === `decision:${decision.key}:agent` ? 'pending' : ''}`}
+                  onClick={() =>
+                    act(`decision:${decision.key}:agent`, 'Answering the decision', `decisions/${decision.key}`, {
+                      chosenKey: 'agent',
+                    })
+                  }
+                  disabled={action.busy}
+                  aria-busy={action.pending === `decision:${decision.key}:agent` || undefined}
                 >
-                  <span className="choice-label">Whatever you judge best</span>
+                  <span className="choice-label">
+                    {action.pending === `decision:${decision.key}:agent` ? <Spinner /> : null}
+                    Whatever you judge best
+                  </span>
                   <span className="choice-detail">The engineer chooses, knowing the options above.</span>
                 </button>
               </div>
@@ -267,17 +306,25 @@ export default function StoryPage() {
 
           <span className="meta">Where should it go back to?</span>
           <div className="choices">
-            {UNBLOCK_ROUTES.map((route) => (
-              <button
-                key={route.target}
-                className="choice"
-                onClick={() => void act('unblock', { target: route.target })}
-                disabled={busy}
-              >
-                <span className="choice-label">{route.label}</span>
-                <span className="choice-detail">{route.help}</span>
-              </button>
-            ))}
+            {UNBLOCK_ROUTES.map((route) => {
+              const key = `unblock:${route.target}`;
+              const pending = action.pending === key;
+              return (
+                <button
+                  key={route.target}
+                  className={`choice ${pending ? 'pending' : ''}`}
+                  onClick={() => act(key, 'Sending it back', 'unblock', { target: route.target })}
+                  disabled={action.busy}
+                  aria-busy={pending || undefined}
+                >
+                  <span className="choice-label">
+                    {pending ? <Spinner /> : null}
+                    {route.label}
+                  </span>
+                  <span className="choice-detail">{route.help}</span>
+                </button>
+              );
+            })}
           </div>
         </Card>
       ) : null}
@@ -292,10 +339,19 @@ export default function StoryPage() {
             on the plan.
           </span>
           <div className="row">
-            <Button onClick={() => void act('retry')} disabled={busy}>
+            <Button
+              onClick={() => act('retry', 'Retrying', 'retry')}
+              disabled={action.busy}
+              pending={action.pending === 'retry'}
+            >
               Retry
             </Button>
-            <Button variant="danger" onClick={() => void act('stop')} disabled={busy}>
+            <Button
+              variant="danger"
+              onClick={() => act('stop', 'Stopping', 'stop')}
+              disabled={action.busy}
+              pending={action.pending === 'stop'}
+            >
               Stop it for good
             </Button>
           </div>
@@ -308,7 +364,11 @@ export default function StoryPage() {
             The plan touches something the risk check flagged, so approving it once is not enough.
           </Alert>
           <div className="row">
-            <Button onClick={() => void act('high-risk/confirm')} disabled={busy}>
+            <Button
+              onClick={() => act('confirm', 'Confirming', 'high-risk/confirm')}
+              disabled={action.busy}
+              pending={action.pending === 'confirm'}
+            >
               Confirm and start
             </Button>
           </div>
@@ -333,7 +393,11 @@ export default function StoryPage() {
               : 'It stays local, because the token does not grant write access to the remote.'}
           </span>
           <div className="row">
-            <Button onClick={() => void act('merge', { action: 'merge' })} disabled={busy}>
+            <Button
+              onClick={() => act('merge:merge', 'Merging', 'merge', { action: 'merge' })}
+              disabled={action.busy}
+              pending={action.pending === 'merge:merge'}
+            >
               Merge into {detail.project.workBranch}
             </Button>
           </div>
@@ -355,13 +419,27 @@ export default function StoryPage() {
             half of what two people meant.
           </span>
           <div className="row">
-            <Button onClick={() => void act('merge', { action: 'continue' })} disabled={busy}>
+            <Button
+              onClick={() => act('merge:continue', 'Carrying on with the merge', 'merge', { action: 'continue' })}
+              disabled={action.busy}
+              pending={action.pending === 'merge:continue'}
+            >
               I resolved it, carry on
             </Button>
-            <Button variant="secondary" onClick={() => void act('merge', { action: 'resolve' })} disabled={busy}>
+            <Button
+              variant="secondary"
+              onClick={() => act('merge:resolve', 'Handing the conflict to the engineer', 'merge', { action: 'resolve' })}
+              disabled={action.busy}
+              pending={action.pending === 'merge:resolve'}
+            >
               Let the engineer try
             </Button>
-            <Button variant="ghost" onClick={() => void act('merge', { action: 'abort' })} disabled={busy}>
+            <Button
+              variant="ghost"
+              onClick={() => act('merge:abort', 'Abandoning the merge', 'merge', { action: 'abort' })}
+              disabled={action.busy}
+              pending={action.pending === 'merge:abort'}
+            >
               Abandon the merge
             </Button>
           </div>
@@ -377,7 +455,12 @@ export default function StoryPage() {
             anything has been committed there since.
           </span>
           <div className="row">
-            <Button variant="ghost" onClick={() => void act('merge', { action: 'undo' })} disabled={busy}>
+            <Button
+              variant="ghost"
+              onClick={() => act('merge:undo', 'Undoing the merge', 'merge', { action: 'undo' })}
+              disabled={action.busy}
+              pending={action.pending === 'merge:undo'}
+            >
               Undo the merge
             </Button>
           </div>
@@ -399,7 +482,7 @@ export default function StoryPage() {
                   : `Applying: ${latestApply?.step ?? 'starting'}`}
               </span>
               <div className="row">
-                <Button disabled>Applying…</Button>
+                <Button pending>Applying…</Button>
               </div>
             </>
           ) : (
@@ -414,7 +497,7 @@ export default function StoryPage() {
                 <span className="meta">Applied {relativeAge(latestApply.finishedAt)}</span>
               ) : null}
               <div className="row">
-                <Button onClick={() => void applyCandidate()} disabled={busy}>
+                <Button onClick={() => void applyCandidate()} disabled={action.busy}>
                   Apply it and restart
                 </Button>
               </div>
@@ -460,20 +543,20 @@ export default function StoryPage() {
             diff={review.diff}
             decisions={review.decisions}
             canAct={task.state === 'REVIEW_READY'}
-            onChanged={() => void load()}
+            onChanged={load}
           />
         ) : (
           <Empty>No plan has been written yet. The research pass has to finish first.</Empty>
         )
       ) : null}
 
-      {tab === 'work' ? <WorkView taskId={taskId} detail={detail} onAction={() => void load()} /> : null}
+      {tab === 'work' ? <WorkView taskId={taskId} detail={detail} onAction={load} /> : null}
 
       {tab === 'checks' ? (
         <ChecksView qaRuns={detail.qaRuns} maxIterations={detail.maxQaIterations ?? 5} />
       ) : null}
 
-      {tab === 'report' ? <ReportView taskId={taskId} task={task} onChanged={() => void load()} /> : null}
+      {tab === 'report' ? <ReportView taskId={taskId} task={task} onChanged={load} /> : null}
 
       {tab === 'timeline' ? <TimelineView taskId={taskId} /> : null}
 

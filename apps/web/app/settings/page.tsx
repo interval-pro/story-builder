@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type SettingDescriptor } from '../../lib/api';
-import { Badge, Button, Card, Empty, ErrorText, Field } from '../../components/ui';
+import { Badge, Button, Card, ErrorText, Field, Loading } from '../../components/ui';
 import { useProjects } from '../../components/shell';
+import { useAction } from '../../components/use-action';
+import { loadPhase } from '../../lib/load-state';
 
 const GROUPS: { key: string; title: string; standfirst: string }[] = [
   {
@@ -59,19 +61,27 @@ export default function SettingsPage() {
   const [scope, setScope] = useState<string>('installation');
   const [settings, setSettings] = useState<SettingDescriptor[]>([]);
   const [edits, setEdits] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const action = useAction();
 
   const perProject = scope !== 'installation';
   const path = perProject ? `/api/projects/${encodeURIComponent(scope)}/settings` : '/api/settings';
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  // The scope on screen now. Every response is checked against it, so the values
+  // of a scope switched away from never land on the one switched to.
+  const pathRef = useRef(path);
+  pathRef.current = path;
 
   const load = useCallback(async () => {
     try {
       const result = await api.get<{ settings: SettingDescriptor[] }>(path);
+      if (pathRef.current !== path) return;
       setSettings(result.settings);
+      setLoadedFor(path);
       setError(null);
     } catch (loadError) {
+      if (pathRef.current !== path) return;
       setError(loadError instanceof Error ? loadError.message : String(loadError));
     }
   }, [path]);
@@ -81,36 +91,32 @@ export default function SettingsPage() {
     void load();
   }, [load]);
 
-  async function save() {
+  function save() {
     if (Object.keys(edits).length === 0) return;
-    setBusy(true);
-    try {
+    void action.run('save', 'Saving the settings', async () => {
       const result = await api.put<{ settings: SettingDescriptor[] }>(path, { values: edits });
+      if (pathRef.current !== path) return;
       setSettings(result.settings);
+      setLoadedFor(path);
       setEdits({});
       setSaved(true);
       setError(null);
       setTimeout(() => setSaved(false), 4000);
-    } catch (putError) {
-      setError(putError instanceof Error ? putError.message : String(putError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
-  async function clear(key: string) {
-    setBusy(true);
-    try {
+  function clear(key: string) {
+    void action.run(`clear:${key}`, 'Resetting the setting', async () => {
       const result = await api.delete<{ settings: SettingDescriptor[] }>(`${path}/${encodeURIComponent(key)}`);
+      if (pathRef.current !== path) return;
       setSettings(result.settings);
+      setLoadedFor(path);
       setEdits((current) => {
         const next = { ...current };
         delete next[key];
         return next;
       });
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   function control(setting: SettingDescriptor) {
@@ -176,6 +182,7 @@ export default function SettingsPage() {
   }
 
   const dirty = Object.keys(edits).length;
+  const phase = loadPhase({ key: path, loadedFor, error });
 
   return (
     <div className="page enter">
@@ -189,7 +196,7 @@ export default function SettingsPage() {
           </p>
         </div>
         <div className="row">
-          <Button onClick={() => void save()} disabled={busy || dirty === 0}>
+          <Button onClick={save} disabled={action.busy || dirty === 0} pending={action.pending === 'save'}>
             {dirty === 0 ? 'Nothing to save' : `Save ${dirty} change${dirty === 1 ? '' : 's'}`}
           </Button>
         </div>
@@ -218,11 +225,12 @@ export default function SettingsPage() {
       </div>
 
       {error ? <ErrorText>{error}</ErrorText> : null}
+      {action.error ? <ErrorText>{action.error}</ErrorText> : null}
       {saved ? <span className="meta">Saved.</span> : null}
 
-      {settings.length === 0 ? <Empty>Reading the settings.</Empty> : null}
+      {phase === 'loading' ? <Loading label="Reading the settings" shape="block" rows={3} /> : null}
 
-      {GROUPS.map((group) => {
+      {(phase === 'ready' ? GROUPS : []).map((group) => {
         const own = settings.filter((setting) => setting.group === group.key);
         if (own.length === 0) return null;
         return (
@@ -240,7 +248,13 @@ export default function SettingsPage() {
                       {SOURCE_WORDS[setting.source]}
                     </Badge>
                     {(perProject ? setting.source === 'project' : setting.source === 'stored') ? (
-                      <Button size="sm" variant="ghost" onClick={() => void clear(setting.key)} disabled={busy}>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => clear(setting.key)}
+                        disabled={action.busy}
+                        pending={action.pending === `clear:${setting.key}`}
+                      >
                         {perProject ? 'Use the installation\u2019s' : 'Reset'}
                       </Button>
                     ) : null}

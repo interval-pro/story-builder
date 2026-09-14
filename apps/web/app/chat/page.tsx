@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type ChatMessage, type ChatSession, type Project } from '../../lib/api';
 import { useProjects } from '../../components/shell';
-import { Alert, Badge, Button, Card, Empty, ErrorText, Field } from '../../components/ui';
+import { Alert, Button, Card, Empty, ErrorText, Field } from '../../components/ui';
+import { ChatMessageBubble } from '../../components/chat-message';
 import { DraftTextarea } from '../../components/draft-textarea';
+import { useAction } from '../../components/use-action';
 import { clearDraft, readDraft } from '../../lib/draft-field';
 import { relativeAge } from '../../lib/format';
 
@@ -35,8 +37,8 @@ export default function ChatPage() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [view, setView] = useState<SessionView | null>(null);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const action = useAction();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -79,39 +81,31 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ block: 'end' });
   }, [view?.messages.length]);
 
-  async function startSession() {
+  function startSession() {
     if (!project) return;
-    setBusy(true);
-    try {
+    void action.run('start', 'Starting a chat', async () => {
       const result = await api.post<{ session: ChatSession }>('/api/chat/sessions', { projectId: project.id });
       await loadSessions();
       setActiveId(result.session.id);
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
-  async function send() {
+  function send() {
     const text = readDraft(inputRef.current).trim();
     if (!text || !activeId) return;
-    setBusy(true);
-    try {
+    void action.run('send', 'Sending the message', async () => {
       await api.post(`/api/chat/sessions/${activeId}/messages`, { text });
       clearDraft(inputRef.current);
       setError(null);
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
-  async function archive(sessionId: string) {
-    await api.delete(`/api/chat/sessions/${sessionId}`);
-    setActiveId(null);
-    await loadSessions();
+  function archive(sessionId: string) {
+    void action.run('archive', 'Archiving the chat', async () => {
+      await api.delete(`/api/chat/sessions/${sessionId}`);
+      setActiveId(null);
+      await loadSessions();
+    });
   }
 
   if (!project) return <div className="page">Add a project first.</div>;
@@ -126,12 +120,13 @@ export default function ChatPage() {
             except the conversation is kept here and survives a restart.
           </p>
         </div>
-        <Button onClick={() => void startSession()} disabled={busy}>
+        <Button onClick={startSession} disabled={action.busy} pending={action.pending === 'start'}>
           New chat
         </Button>
       </div>
 
       {error ? <ErrorText>{error}</ErrorText> : null}
+      {action.error ? <ErrorText>{action.error}</ErrorText> : null}
 
       {view && view.session.permissionMode !== 'dontAsk' ? (
         <Alert tone="caution" title={`This chat can change files in ${project.name}`}>
@@ -179,34 +174,7 @@ export default function ChatPage() {
               {view.messages.length === 0 ? (
                 <Empty>Nothing has been said yet.</Empty>
               ) : (
-                view.messages.map((message) => (
-                  <div key={message.id} className={`turn ${message.role}`}>
-                    <div className="row-between">
-                      <span className="meta">{message.role === 'user' ? 'You' : 'Story Builder'}</span>
-                      <span className="row">
-                        {message.status === 'STREAMING' ? <Badge tone="waiting">writing</Badge> : null}
-                        {message.status === 'PENDING' ? <Badge tone="waiting">queued</Badge> : null}
-                        {message.status === 'FAILED' ? <Badge tone="critical">failed</Badge> : null}
-                        <span className="meta">{relativeAge(message.createdAt)}</span>
-                      </span>
-                    </div>
-                    {message.content ? (
-                      <div className="turn-body">{message.content}</div>
-                    ) : message.status === 'PENDING' || message.status === 'STREAMING' ? (
-                      <div className="body-sm">Thinking…</div>
-                    ) : null}
-                    {message.toolCalls.length > 0 ? (
-                      <div className="turn-tools">
-                        {message.toolCalls.slice(0, 16).map((call, index) => (
-                          <span className="tool-chip" key={`${call.name}-${index}`}>
-                            {call.name}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                    {message.error ? <ErrorText>{message.error}</ErrorText> : null}
-                  </div>
-                ))
+                view.messages.map((message) => <ChatMessageBubble key={message.id} message={message} />)
               )}
               <div ref={bottomRef} />
 
@@ -216,15 +184,24 @@ export default function ChatPage() {
                     textareaRef={inputRef}
                     rows={4}
                     placeholder="Where does the email change get written today?"
-                    onSubmit={() => void send()}
+                    onSubmit={send}
                   />
                 </Field>
                 <div className="row">
-                  <Button onClick={() => void send()} disabled={busy || view.pending}>
+                  <Button
+                    onClick={send}
+                    disabled={action.busy || view.pending}
+                    pending={action.pending === 'send'}
+                  >
                     {view.pending ? 'Waiting for the answer' : 'Send'}
                   </Button>
                   <span className="meta">Enter sends · Shift and Enter makes a new line</span>
-                  <Button variant="ghost" onClick={() => void archive(view.session.id)} disabled={busy}>
+                  <Button
+                    variant="ghost"
+                    onClick={() => archive(view.session.id)}
+                    disabled={action.busy}
+                    pending={action.pending === 'archive'}
+                  >
                     Archive this chat
                   </Button>
                 </div>

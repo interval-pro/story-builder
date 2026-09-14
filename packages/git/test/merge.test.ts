@@ -167,3 +167,24 @@ test('a merge is undoable while it is still the last thing that happened', async
   // undo from taking someone else's commit with it.
   assert.notEqual(await git.resolveRef('HEAD^1'), undoCommit);
 });
+
+test('a conflict resolved in an editor counts as resolved before anyone stages it', async () => {
+  // Resolving in an editor removes the markers and nothing else. Git keeps
+  // listing the file as unmerged until it is added, so asking git whether the
+  // conflict is over refused a person who had finished, three times in a row.
+  const { dir, git } = await divergent();
+  await git.checkoutBranch('story');
+  await git.rebase('main');
+  assert.deepEqual(await git.filesWithConflictMarkers(), ['shared.txt']);
+
+  await writeFile(path.join(dir, 'shared.txt'), 'both intentions, kept\n');
+  assert.deepEqual(await git.unmergedPaths(), ['shared.txt'], 'git still calls it unmerged');
+  assert.deepEqual(await git.filesWithConflictMarkers(), [], 'but nothing in it is still in conflict');
+});
+
+test('a file with its markers still in it is still in conflict', async () => {
+  const { git } = await divergent();
+  const merge = await git.mergeBranch('story', 'Merge story: a title');
+  assert.equal(merge.merged, false);
+  assert.deepEqual(await git.filesWithConflictMarkers(), ['shared.txt']);
+});

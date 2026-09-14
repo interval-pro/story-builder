@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api, type Task, type UsageView } from '../lib/api';
 import { useProjects } from '../components/shell';
-import { Alert, Bar, Button, Card, Empty, ErrorText, StateBadge, Tile } from '../components/ui';
+import { Activity, Alert, Bar, Button, Card, Empty, ErrorText, StateBadge, Tile } from '../components/ui';
+import { jobActivity, jobStatusesByTask, taskActivity } from '../lib/activity';
 import { formatTokens, formatTokensExact, relativeAge } from '../lib/format';
 import { explainState, jobLabel } from '../lib/labels';
 
@@ -68,6 +69,7 @@ export default function OverviewPage() {
   }, [projects]);
 
   const waiting = queue?.waiting ?? [];
+  const jobStatusByTask = jobStatusesByTask(queue?.entries);
   const week = usage?.week;
 
   if (loading) return <div className="page">Reading the installation.</div>;
@@ -144,7 +146,7 @@ export default function OverviewPage() {
                   </div>
                   {item.blockedReason ? <div className="body-sm">{item.blockedReason}</div> : null}
                 </div>
-                <StateBadge state={item.state} />
+                <StateBadge state={item.state} activity={taskActivity(item.state, jobStatusByTask.get(item.taskId))} />
               </div>
             ))}
           </div>
@@ -174,7 +176,7 @@ export default function OverviewPage() {
                     {task.projectName} · {explainState(task.state).means}
                   </div>
                 </div>
-                <StateBadge state={task.state} />
+                <StateBadge state={task.state} activity={taskActivity(task.state, jobStatusByTask.get(task.id))} />
               </div>
             ))}
           </div>
@@ -256,7 +258,9 @@ export default function OverviewPage() {
               {queue.entries.slice(0, 4).map((entry) => (
                 <div className="kv" key={entry.id}>
                   <span className="kv-key">{entry.projectName ?? '—'}</span>
-                  <span className="kv-value">{jobLabel(entry.jobType)}</span>
+                  <span className="kv-value">
+                    <Activity kind={jobActivity(entry.status)} label={jobLabel(entry.jobType)} />
+                  </span>
                 </div>
               ))}
             </Card>

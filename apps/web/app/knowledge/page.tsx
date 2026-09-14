@@ -1,10 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api';
 import { useProjects } from '../../components/shell';
-import { Button, Card, Empty, ErrorText, Tile } from '../../components/ui';
+import { Button, Card, Empty, ErrorText, Loading, Tile } from '../../components/ui';
+import { useAction } from '../../components/use-action';
 import { relativeAge } from '../../lib/format';
+import { loadPhase } from '../../lib/load-state';
 
 interface Entity {
   id: string;
@@ -32,19 +34,26 @@ const KINDS = ['', 'module', 'file', 'function', 'class', 'type', 'route', 'tabl
  * something to correct.
  */
 export default function KnowledgePage() {
-  const { project } = useProjects();
+  const { project, loading: shellLoading } = useProjects();
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [summary, setSummary] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
   const [kind, setKind] = useState('');
   const [term, setTerm] = useState('');
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const action = useAction();
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const key = project ? `${project.id}|${kind}` : null;
+  // Read after the await, so a response for a project or kind switched away
+  // from is dropped rather than shown under the new one.
+  const keyRef = useRef(key);
+  keyRef.current = key;
 
   const load = useCallback(
     async (selectedKind: string) => {
       if (!project) return;
+      const requested = `${project.id}|${selectedKind}`;
       try {
         const query = new URLSearchParams({ projectId: project.id });
         if (selectedKind) query.set('kind', selectedKind);
@@ -54,12 +63,15 @@ export default function KnowledgePage() {
           summary: string | null;
           total?: number;
         }>(`/api/project-knowledge?${query.toString()}`);
+        if (keyRef.current !== requested) return;
         setSnapshots(result.snapshots);
         setEntities(result.entities);
         setSummary(result.summary);
         setTotal(result.total ?? result.entities.length);
+        setLoadedFor(requested);
         setError(null);
       } catch (loadError) {
+        if (keyRef.current !== requested) return;
         setError(loadError instanceof Error ? loadError.message : String(loadError));
       }
     },
@@ -82,17 +94,17 @@ export default function KnowledgePage() {
     setTotal(result.entities.length);
   }
 
-  async function refresh() {
+  function refresh() {
     if (!project) return;
-    setBusy(true);
-    try {
-      await api.post(`/api/projects/${project.id}/knowledge-refresh`);
-    } finally {
-      setBusy(false);
-    }
+    void action.run('refresh', 'Reading it again', () => api.post(`/api/projects/${project.id}/knowledge-refresh`));
   }
 
-  const latest = snapshots[0];
+  const phase = loadPhase({ shellLoading, key, loadedFor, error });
+  const showData = phase === 'ready' || phase === 'no-project';
+  // Snapshots still hold the last project's values after a failed load, so only read them when they are this key's.
+  const latest = showData ? snapshots[0] : undefined;
+  /** A number the page does not have yet is not zero. */
+  const known = (value: string | number) => (phase === 'failed' ? '—' : value);
 
   return (
     <div className="page enter">
@@ -104,21 +116,27 @@ export default function KnowledgePage() {
             gets a stable picture of it, taken at the commit the story started from.
           </p>
         </div>
-        <Button variant="secondary" onClick={() => void refresh()} disabled={busy || !project}>
+        <Button
+          variant="secondary"
+          onClick={refresh}
+          disabled={action.busy || !project}
+          pending={action.pending === 'refresh'}
+        >
           Read it again
         </Button>
       </div>
 
       {error ? <ErrorText>{error}</ErrorText> : null}
+      {action.error ? <ErrorText>{action.error}</ErrorText> : null}
 
       <div className="tiles">
-        <Tile value={total} label="Things found" />
-        <Tile value={snapshots.length} label="Snapshots" />
-        <Tile value={latest ? `#${latest.sequence}` : '—'} label="Latest snapshot" />
-        <Tile value={latest ? relativeAge(latest.createdAt) : '—'} label="Last read" />
+        <Tile value={known(total)} label="Things found" loading={phase === 'loading'} />
+        <Tile value={known(snapshots.length)} label="Snapshots" loading={phase === 'loading'} />
+        <Tile value={latest ? `#${latest.sequence}` : '—'} label="Latest snapshot" loading={phase === 'loading'} />
+        <Tile value={latest ? relativeAge(latest.createdAt) : '—'} label="Last read" loading={phase === 'loading'} />
       </div>
 
-      {summary ? (
+      {showData && summary ? (
         <Card>
           <span className="meta">How the system summarises this project</span>
           <div className="prose">{summary}</div>
@@ -154,7 +172,9 @@ export default function KnowledgePage() {
         </div>
       </div>
 
-      {entities.length === 0 ? (
+      {phase === 'loading' ? (
+        <Loading label="Reading what the project is made of" shape="block" rows={2} />
+      ) : phase === 'failed' ? null : entities.length === 0 ? (
         <Empty>Nothing matches. A project that has just been added may not have been read yet.</Empty>
       ) : (
         <Card>

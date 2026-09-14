@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api';
 import { useProjects } from '../../components/shell';
-import { Badge, Bar, Button, Card, Dialog, Empty, ErrorText, Field } from '../../components/ui';
+import { Badge, Bar, Button, Card, Dialog, Empty, ErrorText, Field, Loading } from '../../components/ui';
+import { useAction } from '../../components/use-action';
+import { loadPhase } from '../../lib/load-state';
 
 interface Principle {
   id: string;
@@ -38,25 +40,35 @@ function strengthWord(strength: number): string {
  * correction is a hypothesis.
  */
 export default function BrainPage() {
-  const { project } = useProjects();
+  const { project, loading: shellLoading } = useProjects();
   const [principles, setPrinciples] = useState<Principle[]>([]);
   const [invariants, setInvariants] = useState<Invariant[]>([]);
   const [adding, setAdding] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const action = useAction();
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const key = project?.id ?? null;
+  // This page does not poll, so a late response for a project switched away
+  // from would stay on screen for good. It is checked against this after the await.
+  const keyRef = useRef(key);
+  keyRef.current = key;
   const statementRef = useRef<HTMLInputElement>(null);
   const categoryRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     if (!project) return;
+    const requested = project.id;
     try {
       const result = await api.get<{ principles: Principle[]; invariants: Invariant[] }>(
         `/api/project-brain?projectId=${project.id}`,
       );
+      if (keyRef.current !== requested) return;
       setPrinciples(result.principles);
       setInvariants(result.invariants);
+      setLoadedFor(requested);
       setError(null);
     } catch (loadError) {
+      if (keyRef.current !== requested) return;
       setError(loadError instanceof Error ? loadError.message : String(loadError));
     }
   }, [project]);
@@ -65,28 +77,24 @@ export default function BrainPage() {
     void load();
   }, [load]);
 
-  async function add() {
+  function add() {
     const statement = statementRef.current?.value.trim() ?? '';
     if (statement.length < 10) {
-      setError('A principle needs a sentence.');
+      action.report('A principle needs a sentence.');
       return;
     }
-    setBusy(true);
-    try {
+    void action.run('add', 'Adding the principle', async () => {
       await api.post(`/api/project-brain/principles?projectId=${project?.id}`, {
         statement,
         category: categoryRef.current?.value.trim() || 'general',
       });
       setAdding(false);
       await load();
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   const active = principles.filter((principle) => principle.status === 'ACTIVE');
+  const phase = loadPhase({ shellLoading, key, loadedFor, error });
 
   return (
     <div className="page enter">
@@ -104,8 +112,11 @@ export default function BrainPage() {
       </div>
 
       {error ? <ErrorText>{error}</ErrorText> : null}
+      {action.error ? <ErrorText>{action.error}</ErrorText> : null}
 
-      {active.length === 0 ? (
+      {phase === 'loading' ? (
+        <Loading label="Reading what has been learned" shape="card" rows={2} />
+      ) : phase === 'failed' ? null : active.length === 0 ? (
         <Empty>
           Nothing has been learned yet. Principles appear here when you correct a plan and the system works out the
           general rule behind your correction.
@@ -146,7 +157,9 @@ export default function BrainPage() {
           <h2 className="subhead">Invariants</h2>
           <p className="standfirst">Things that must never be violated. The checks read these on every change.</p>
         </div>
-        {invariants.length === 0 ? (
+        {phase === 'loading' ? (
+          <Loading label="Reading the invariants" rows={2} />
+        ) : phase === 'failed' ? null : invariants.length === 0 ? (
           <Empty>No invariant has been recorded.</Empty>
         ) : (
           <div className="list">
@@ -172,7 +185,7 @@ export default function BrainPage() {
         title="Add a principle"
         footer={
           <>
-            <Button onClick={() => void add()} disabled={busy}>
+            <Button onClick={add} disabled={action.busy} pending={action.pending === 'add'}>
               Add it
             </Button>
             <Button variant="ghost" onClick={() => setAdding(false)}>

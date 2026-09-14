@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { api, type IdeaQuestion, type IdeaSession, type StoryDraft, type Task } from '../../../lib/api';
-import { Alert, Bar, Button, Card, Empty, ErrorText, Field } from '../../../components/ui';
+import { Activity, Alert, Bar, Button, Card, Empty, ErrorText, Field, Loading, Spinner } from '../../../components/ui';
+import { useAction } from '../../../components/use-action';
+import { loadPhase } from '../../../lib/load-state';
+import { ideaActivity } from '../../../lib/activity';
 import { DraftTextarea } from '../../../components/draft-textarea';
 import { clearDraft, readDraft } from '../../../lib/draft-field';
 import { relativeAge } from '../../../lib/format';
@@ -30,14 +33,16 @@ export default function IdeaPage() {
   const [view, setView] = useState<SessionView | null>(null);
   const [index, setIndex] = useState(0);
   const [writingOwn, setWritingOwn] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const action = useAction();
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const ownRef = useRef<HTMLTextAreaElement>(null);
 
   const load = useCallback(async () => {
     try {
       const result = await api.get<SessionView>(`/api/ideas/${sessionId}`);
       setView(result);
+      setLoadedFor(sessionId);
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));
@@ -58,37 +63,41 @@ export default function IdeaPage() {
     setIndex(next === -1 ? Math.max(0, view.currentRound.length - 1) : next);
   }, [view]);
 
-  async function answer(question: IdeaQuestion, chosenKey: string, customAnswer?: string) {
-    setBusy(true);
-    try {
+  function answerKey(question: IdeaQuestion, chosenKey: string) {
+    return `answer:${question.id}:${chosenKey}`;
+  }
+
+  function answer(question: IdeaQuestion, chosenKey: string, customAnswer?: string) {
+    void action.run(answerKey(question, chosenKey), 'Answering the question', async () => {
       await api.post(`/api/ideas/${sessionId}/answers`, { questionId: question.id, chosenKey, customAnswer });
       setWritingOwn(false);
       clearDraft(ownRef.current);
       await load();
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
-  async function launch(draft: StoryDraft) {
-    setBusy(true);
-    try {
+  function launch(draft: StoryDraft) {
+    void action.run(`launch:${draft.id}`, 'Launching the story', async () => {
       const result = await api.post<{ task: Task }>(`/api/drafts/${draft.id}/launch`);
       router.push(`/tasks/${result.task.id}`);
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-      setBusy(false);
-    }
+    });
   }
 
-  if (!view) return <div className="page">{error ? <ErrorText>{error}</ErrorText> : 'Reading the idea.'}</div>;
+  const phase = loadPhase({ key: sessionId, loadedFor, error });
+  if (phase !== 'ready' || !view) {
+    return (
+      <div className="page enter">
+        <span className="meta" onClick={() => router.push('/stories')} style={{ cursor: 'pointer', color: 'var(--text-accent)' }}>
+          ← All stories
+        </span>
+        {phase === 'failed' ? <ErrorText>{error}</ErrorText> : <Loading label="Reading the idea" shape="block" rows={2} />}
+      </div>
+    );
+  }
 
   const { session, currentRound, history, drafts } = view;
   const answered = currentRound.filter((question) => question.answeredAt).length;
   const question = currentRound[index];
-  const thinking = session.status === 'QUEUED' || session.status === 'THINKING';
 
   return (
     <div className="page enter">
@@ -102,6 +111,7 @@ export default function IdeaPage() {
       </div>
 
       {error ? <ErrorText>{error}</ErrorText> : null}
+      {action.error ? <ErrorText>{action.error}</ErrorText> : null}
 
       <Card>
         <span className="meta">What you wrote · {relativeAge(session.createdAt)}</span>
@@ -127,12 +137,26 @@ export default function IdeaPage() {
         </Alert>
       ) : null}
 
-      {thinking ? (
+      {ideaActivity(session.status) === 'working' ? (
         <Card>
-          <span className="meta">Reading the project</span>
+          <span className="meta">
+            <Activity kind="working" role="status" label="Reading the project" />
+          </span>
           <p className="body-sm">
             It is looking at the code this idea touches, so its questions are about your repository rather than about
             software in general. This is the cheap step; it takes a minute or two.
+          </p>
+        </Card>
+      ) : null}
+
+      {ideaActivity(session.status) === 'queued' ? (
+        <Card>
+          <span className="meta">
+            <Activity kind="queued" role="status" label="Waiting for a slot" />
+          </span>
+          <p className="body-sm">
+            Nothing has started on it yet. Another piece of work holds the slot, and this idea is read as soon as it
+            frees.
           </p>
         </Card>
       ) : null}
@@ -158,17 +182,24 @@ export default function IdeaPage() {
             </div>
 
             <div className="choices" style={{ marginTop: 8 }}>
-              {question.options.map((option) => (
-                <button
-                  key={option.key}
-                  className={`choice ${question.chosenKey === option.key ? 'selected' : ''}`}
-                  onClick={() => void answer(question, option.key)}
-                  disabled={busy || Boolean(question.answeredAt)}
-                >
-                  <span className="choice-label">{option.label}</span>
-                  {option.detail ? <span className="choice-detail">{option.detail}</span> : null}
-                </button>
-              ))}
+              {question.options.map((option) => {
+                const pending = action.pending === answerKey(question, option.key);
+                return (
+                  <button
+                    key={option.key}
+                    className={`choice ${question.chosenKey === option.key ? 'selected' : ''} ${pending ? 'pending' : ''}`}
+                    onClick={() => answer(question, option.key)}
+                    disabled={action.busy || Boolean(question.answeredAt)}
+                    aria-busy={pending || undefined}
+                  >
+                    <span className="choice-label">
+                      {pending ? <Spinner /> : null}
+                      {option.label}
+                    </span>
+                    {option.detail ? <span className="choice-detail">{option.detail}</span> : null}
+                  </button>
+                );
+              })}
 
               {writingOwn ? (
                 <Card tone="plain">
@@ -182,8 +213,9 @@ export default function IdeaPage() {
                   <div className="row">
                     <Button
                       size="sm"
-                      onClick={() => void answer(question, 'custom', readDraft(ownRef.current))}
-                      disabled={busy}
+                      onClick={() => answer(question, 'custom', readDraft(ownRef.current))}
+                      disabled={action.busy}
+                      pending={action.pending === answerKey(question, 'custom')}
                     >
                       Use this answer
                     </Button>
@@ -196,7 +228,7 @@ export default function IdeaPage() {
                 <button
                   className="choice"
                   onClick={() => setWritingOwn(true)}
-                  disabled={busy || Boolean(question.answeredAt)}
+                  disabled={action.busy || Boolean(question.answeredAt)}
                 >
                   <span className="choice-label">Something else</span>
                   <span className="choice-detail">Answer in your own words.</span>
@@ -251,7 +283,12 @@ export default function IdeaPage() {
                       </Button>
                     ) : (
                       <>
-                        <Button size="sm" onClick={() => void launch(draft)} disabled={busy}>
+                        <Button
+                          size="sm"
+                          onClick={() => launch(draft)}
+                          disabled={action.busy}
+                          pending={action.pending === `launch:${draft.id}`}
+                        >
                           Launch this one
                         </Button>
                         <Button size="sm" variant="ghost" onClick={() => router.push('/stories')}>

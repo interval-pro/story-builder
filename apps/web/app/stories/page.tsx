@@ -4,11 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, type IdeaSession, type StoryDraft, type Task } from '../../lib/api';
 import { useProjects } from '../../components/shell';
-import { Button, Card, Dialog, Empty, ErrorText, Field, StateBadge, Tile } from '../../components/ui';
+import { Activity, Button, Card, Dialog, Empty, ErrorText, Field, Loading, StateBadge, Tile } from '../../components/ui';
+import { ideaActivity, jobStatusesByTask, taskActivity } from '../../lib/activity';
 import { DraftTextarea } from '../../components/draft-textarea';
+import { useAction } from '../../components/use-action';
 import { clearDraft, readDraft } from '../../lib/draft-field';
 import { relativeAge } from '../../lib/format';
 import { explainState } from '../../lib/labels';
+import { loadPhase } from '../../lib/load-state';
 
 type Filter = 'all' | 'waiting' | 'running' | 'done';
 
@@ -35,7 +38,7 @@ function matches(filter: Filter, state: string): boolean {
  * review, and an idea described in one line sent the research pass off to guess.
  */
 export default function StoriesPage() {
-  const { project } = useProjects();
+  const { project, queue, loading: shellLoading } = useProjects();
   const router = useRouter();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [drafts, setDrafts] = useState<StoryDraft[]>([]);
@@ -43,8 +46,14 @@ export default function StoriesPage() {
   const [filter, setFilter] = useState<Filter>('all');
   const [composing, setComposing] = useState(false);
   const [editing, setEditing] = useState<StoryDraft | null>(null);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const action = useAction();
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const key = project?.id ?? null;
+  // The project on screen now, read after each await: a response for a project
+  // switched away from must not land on the one switched to.
+  const keyRef = useRef(key);
+  keyRef.current = key;
   const ideaRef = useRef<HTMLTextAreaElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
@@ -61,17 +70,21 @@ export default function StoriesPage() {
 
   const load = useCallback(async () => {
     if (!project) return;
+    const requested = project.id;
     try {
       const [taskResult, draftResult, sessionResult] = await Promise.all([
         api.get<{ tasks: Task[] }>(`/api/tasks?projectId=${project.id}`),
         api.get<{ drafts: StoryDraft[] }>(`/api/drafts?projectId=${project.id}`),
         api.get<{ sessions: IdeaSession[] }>(`/api/ideas?projectId=${project.id}`),
       ]);
+      if (keyRef.current !== requested) return;
       setTasks(taskResult.tasks);
       setDrafts(draftResult.drafts);
       setSessions(sessionResult.sessions.filter((session) => session.status !== 'READY'));
+      setLoadedFor(requested);
       setError(null);
     } catch (loadError) {
+      if (keyRef.current !== requested) return;
       setError(loadError instanceof Error ? loadError.message : String(loadError));
     }
   }, [project]);
@@ -82,70 +95,57 @@ export default function StoriesPage() {
     return () => clearInterval(timer);
   }, [load]);
 
-  async function describe() {
+  function describe() {
     const idea = readDraft(ideaRef.current).trim();
     if (idea.length < 10) {
-      setError('Describe the idea in at least a sentence.');
+      action.report('Describe the idea in at least a sentence.');
       return;
     }
-    setBusy(true);
-    try {
+    void action.run('describe', 'Shaping the idea', async () => {
       const result = await api.post<{ sessionId: string }>('/api/ideas', { idea, projectId: project?.id });
       clearDraft(ideaRef.current);
       setComposing(false);
       router.push(`/ideas/${result.sessionId}`);
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
-  async function saveDraft() {
+  function saveDraft() {
     if (!editing) return;
     const title = titleRef.current?.value.trim() ?? '';
     const body = readDraft(bodyRef.current).trim();
     if (!title || body.length < 10) {
-      setError('A story needs a title and at least a sentence of description.');
+      action.report('A story needs a title and at least a sentence of description.');
       return;
     }
-    setBusy(true);
-    try {
+    void action.run('save', 'Saving the draft', async () => {
       await api.put(`/api/drafts/${editing.id}`, { title, body });
       setEditing(null);
       await load();
-    } catch (putError) {
-      setError(putError instanceof Error ? putError.message : String(putError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
-  async function launch(draft: StoryDraft) {
-    setBusy(true);
-    try {
+  function launch(draft: StoryDraft) {
+    void action.run(`launch:${draft.id}`, 'Launching the story', async () => {
       const result = await api.post<{ task: Task }>(`/api/drafts/${draft.id}/launch`);
       router.push(`/tasks/${result.task.id}`);
-    } catch (postError) {
-      setError(postError instanceof Error ? postError.message : String(postError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
-  async function discard(draft: StoryDraft) {
-    setBusy(true);
-    try {
+  function discard(draft: StoryDraft) {
+    void action.run(`discard:${draft.id}`, 'Discarding the draft', async () => {
       await api.delete(`/api/drafts/${draft.id}`);
       await load();
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   const visible = tasks.filter((task) => matches(filter, task.state));
+  const jobStatusByTask = jobStatusesByTask(queue?.entries);
   const waiting = tasks.filter((task) => explainState(task.state).tone === 'waiting').length;
   const active = tasks.filter((task) => explainState(task.state).tone === 'running').length;
+  const phase = loadPhase({ shellLoading, key, loadedFor, error });
+  const waitingForData = phase === 'loading' || phase === 'failed';
+  /** A count the page does not have yet is not zero. */
+  const count = (value: number) => (phase === 'failed' ? '—' : value);
 
   return (
     <div className="page enter">
@@ -165,15 +165,26 @@ export default function StoriesPage() {
       </div>
 
       {error ? <ErrorText>{error}</ErrorText> : null}
+      {action.error ? <ErrorText>{action.error}</ErrorText> : null}
 
       <div className="tiles">
-        <Tile value={waiting} label="Waiting for you" tone={waiting > 0 ? 'attention' : undefined} />
-        <Tile value={active} label="Running" />
-        <Tile value={drafts.length} label="Drafts not started" tone="caution" />
-        <Tile value={tasks.filter((task) => task.state === 'COMPLETED').length} label="Finished" tone="positive" />
+        <Tile
+          value={count(waiting)}
+          label="Waiting for you"
+          tone={waiting > 0 ? 'attention' : undefined}
+          loading={phase === 'loading'}
+        />
+        <Tile value={count(active)} label="Running" loading={phase === 'loading'} />
+        <Tile value={count(drafts.length)} label="Drafts not started" tone="caution" loading={phase === 'loading'} />
+        <Tile
+          value={count(tasks.filter((task) => task.state === 'COMPLETED').length)}
+          label="Finished"
+          tone="positive"
+          loading={phase === 'loading'}
+        />
       </div>
 
-      {sessions.length > 0 ? (
+      {!waitingForData && sessions.length > 0 ? (
         <section className="stack">
           <h2 className="subhead">Ideas being shaped</h2>
           <div className="list">
@@ -190,20 +201,31 @@ export default function StoriesPage() {
                       ? 'Has questions for you'
                       : session.status === 'FAILED'
                         ? (session.error ?? 'Something went wrong')
-                        : 'Working on it'}{' '}
+                        : session.status === 'QUEUED'
+                          ? 'Not started yet'
+                          : 'Working on it'}{' '}
                     · {relativeAge(session.createdAt)}
                   </div>
                 </div>
-                <span className={`badge ${session.status === 'ASKING' ? 'waiting' : session.status === 'FAILED' ? 'critical' : 'running'}`}>
-                  {session.status === 'ASKING' ? 'Answer it' : session.status.toLowerCase()}
-                </span>
+                {session.status === 'ASKING' ? (
+                  <span className="badge waiting">Answer it</span>
+                ) : session.status === 'FAILED' ? (
+                  <span className="badge critical">failed</span>
+                ) : (
+                  <span className="meta">
+                    <Activity
+                      kind={ideaActivity(session.status)}
+                      label={session.status === 'THINKING' ? 'Thinking it through' : 'Waiting for a slot'}
+                    />
+                  </span>
+                )}
               </div>
             ))}
           </div>
         </section>
       ) : null}
 
-      {drafts.length > 0 ? (
+      {!waitingForData && drafts.length > 0 ? (
         <section className="stack">
           <div className="row-between">
             <h2 className="subhead">Drafts</h2>
@@ -223,13 +245,24 @@ export default function StoriesPage() {
                 </p>
                 {draft.rationale ? <span className="body-sm">Why its own story: {draft.rationale}</span> : null}
                 <div className="row" style={{ marginTop: 'auto' }}>
-                  <Button size="sm" onClick={() => void launch(draft)} disabled={busy}>
+                  <Button
+                    size="sm"
+                    onClick={() => launch(draft)}
+                    disabled={action.busy}
+                    pending={action.pending === `launch:${draft.id}`}
+                  >
                     Launch
                   </Button>
-                  <Button size="sm" variant="secondary" onClick={() => setEditing(draft)} disabled={busy}>
+                  <Button size="sm" variant="secondary" onClick={() => setEditing(draft)} disabled={action.busy}>
                     Edit
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => void discard(draft)} disabled={busy}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => discard(draft)}
+                    disabled={action.busy}
+                    pending={action.pending === `discard:${draft.id}`}
+                  >
                     Discard
                   </Button>
                 </div>
@@ -255,7 +288,9 @@ export default function StoriesPage() {
           </div>
         </div>
 
-        {visible.length === 0 ? (
+        {phase === 'loading' ? (
+          <Loading label="Reading the stories" rows={3} />
+        ) : phase === 'failed' ? null : visible.length === 0 ? (
           <Empty>
             {tasks.length === 0
               ? 'No story has been started in this project yet.'
@@ -280,7 +315,7 @@ export default function StoriesPage() {
                   </div>
                   <div className="row">
                     {task.riskLevel ? <span className="badge caution">{task.riskLevel} risk</span> : null}
-                    <StateBadge state={task.state} />
+                    <StateBadge state={task.state} activity={taskActivity(task.state, jobStatusByTask.get(task.id))} />
                   </div>
                 </div>
               );
@@ -296,8 +331,8 @@ export default function StoriesPage() {
         title="What should change?"
         footer={
           <>
-            <Button onClick={() => void describe()} disabled={busy}>
-              {busy ? 'Reading the project…' : 'Shape it into stories'}
+            <Button onClick={describe} disabled={action.busy} pending={action.pending === 'describe'}>
+              {action.pending === 'describe' ? 'Reading the project…' : 'Shape it into stories'}
             </Button>
             <Button variant="ghost" onClick={() => setComposing(false)}>
               Cancel
@@ -326,7 +361,7 @@ export default function StoriesPage() {
         title={editing?.title ?? ''}
         footer={
           <>
-            <Button onClick={() => void saveDraft()} disabled={busy}>
+            <Button onClick={saveDraft} disabled={action.busy} pending={action.pending === 'save'}>
               Save
             </Button>
             <Button variant="ghost" onClick={() => setEditing(null)}>
