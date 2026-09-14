@@ -148,7 +148,20 @@ export function runClaudeCli(options: ClaudeCliOptions): Promise<ClaudeResult> {
         }
         if (block.type === 'text' && block.text) transcript.push(block.text);
       }
-      void options.onEvent?.(event);
+      // A handler records what the agent did: an audit row, a progress step. If
+      // that fails, the record is lost, not the run. The promise used to be
+      // discarded, so a rejection went unhandled and ended the whole worker
+      // process in the middle of an implementation, holding every job it had.
+      if (options.onEvent) {
+        Promise.resolve()
+          .then(() => options.onEvent?.(event))
+          .catch((error: unknown) => {
+            logger.warn('a stream event handler failed; the run continues', {
+              eventType: event.type,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
+      }
     };
 
     child.stdout.on('data', (chunk: Buffer) => {

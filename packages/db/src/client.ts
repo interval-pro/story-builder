@@ -1,5 +1,6 @@
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
 import { loadConfig, createLogger, type Logger } from '@ai-engine/shared';
+import { sanitizeParams } from './sanitize';
 
 const logger: Logger = createLogger('db');
 
@@ -12,7 +13,7 @@ class PoolQueryable implements Queryable {
   constructor(private readonly pool: Pool) {}
 
   async query<T extends QueryResultRow = QueryResultRow>(text: string, params: unknown[] = []): Promise<T[]> {
-    const result = await this.pool.query<T>(text, params as never[]);
+    const result = await this.pool.query<T>(text, sanitizeParams(params) as never[]);
     return result.rows;
   }
 
@@ -26,7 +27,7 @@ class ClientQueryable implements Queryable {
   constructor(private readonly client: PoolClient) {}
 
   async query<T extends QueryResultRow = QueryResultRow>(text: string, params: unknown[] = []): Promise<T[]> {
-    const result = await this.client.query<T>(text, params as never[]);
+    const result = await this.client.query<T>(text, sanitizeParams(params) as never[]);
     return result.rows;
   }
 

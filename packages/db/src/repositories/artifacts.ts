@@ -2,6 +2,7 @@ import { newId, NotFoundError } from '@ai-engine/shared';
 import type { ArtifactRecord } from '@ai-engine/domain';
 import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
+import { toJson } from '../sanitize';
 
 // The bytes are deliberately not in this list. Every query that lists artifacts
 // would otherwise carry every transcript in the task, and a listing is read far
@@ -37,7 +38,7 @@ export class ArtifactRepository {
         input.sizeBytes,
         input.checksum,
         input.content,
-        JSON.stringify(input.metadata ?? {}),
+        toJson(input.metadata ?? {}),
       ],
     );
     return camelize<ArtifactRecord>(row!);

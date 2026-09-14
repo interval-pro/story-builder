@@ -2,6 +2,7 @@ import { newId, NotFoundError } from '@ai-engine/shared';
 import type { KnowledgeEdge, KnowledgeEntity, KnowledgeSnapshot, RuntimeManifest, RuntimeManifestDocument } from '@ai-engine/domain';
 import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
+import { toJson } from '../sanitize';
 
 const SNAPSHOT_COLUMNS = 'id, project_id, sequence, git_commit, status, created_at';
 const ENTITY_COLUMNS = 'id, snapshot_id, kind, name, path, signature, summary, metadata';
@@ -73,7 +74,7 @@ export class KnowledgeRepository {
           entity.path ?? null,
           entity.signature ?? null,
           entity.summary ?? null,
-          JSON.stringify(entity.metadata ?? {}),
+          toJson(entity.metadata ?? {}),
         ],
       );
       created.push(camelize<KnowledgeEntity>(row!));
@@ -90,7 +91,7 @@ export class KnowledgeRepository {
       const row = await this.db.queryOne(
         `INSERT INTO knowledge_edges (id, snapshot_id, from_entity_id, to_entity_id, relation, metadata)
          VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${EDGE_COLUMNS}`,
-        [newId(), snapshotId, edge.fromEntityId, edge.toEntityId, edge.relation, JSON.stringify(edge.metadata ?? {})],
+        [newId(), snapshotId, edge.fromEntityId, edge.toEntityId, edge.relation, toJson(edge.metadata ?? {})],
       );
       created.push(camelize<KnowledgeEdge>(row!));
     }
@@ -154,7 +155,7 @@ export class RuntimeManifestRepository {
     const row = await this.db.queryOne(
       `INSERT INTO runtime_manifests (id, project_id, version, manifest)
        VALUES ($1, $2, $3, $4) RETURNING ${MANIFEST_COLUMNS}`,
-      [newId(), projectId, next?.next ?? 1, JSON.stringify(manifest)],
+      [newId(), projectId, next?.next ?? 1, toJson(manifest)],
     );
     return camelize<RuntimeManifest>(row!);
   }

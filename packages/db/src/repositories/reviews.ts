@@ -10,6 +10,7 @@ import type {
 } from '@ai-engine/domain';
 import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
+import { toJson } from '../sanitize';
 
 const REVIEW_COLUMNS = 'id, task_id, kind, current_version, status, created_at, updated_at';
 const VERSION_COLUMNS = 'id, review_id, version, document, markdown, generated_by_run_id, created_at';
@@ -83,7 +84,7 @@ export class ReviewRepository {
         newId(),
         input.reviewId,
         reviewRow.current_version,
-        JSON.stringify(input.document),
+        toJson(input.document),
         input.markdown,
         input.generatedByRunId ?? null,
       ],
@@ -283,7 +284,7 @@ export class ReviewDecisionRepository {
           decision.question,
           decision.detail,
           decision.blocking,
-          JSON.stringify(decision.options),
+          toJson(decision.options),
           carried ? 'ANSWERED' : 'OPEN',
           carried?.chosen_key ?? null,
           carried?.custom_answer ?? null,

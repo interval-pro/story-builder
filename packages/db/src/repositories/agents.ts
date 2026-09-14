@@ -2,6 +2,7 @@ import { newId, NotFoundError, sha256 } from '@ai-engine/shared';
 import type { AgentDefinition, AgentKind, AgentVersion } from '@ai-engine/domain';
 import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
+import { toJson } from '../sanitize';
 
 const AGENT_COLUMNS = 'id, type, name, current_version_id, created_at';
 const VERSION_COLUMNS = `id, agent_id, version, prompt, prompt_hash, provider, model, model_config,
@@ -65,7 +66,7 @@ export class AgentRepository {
         promptHash,
         input.provider,
         input.model,
-        JSON.stringify(input.modelConfig),
+        toJson(input.modelConfig),
         input.toolPolicyVersion,
       ],
     );
