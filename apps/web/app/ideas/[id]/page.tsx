@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { api, type IdeaQuestion, type IdeaSession, type StoryDraft, type Task } from '../../../lib/api';
-import { Alert, Bar, Button, Card, Empty, ErrorText, Field, Spinner } from '../../../components/ui';
+import { Alert, Bar, Button, Card, Empty, ErrorText, Field, Loading, Spinner } from '../../../components/ui';
 import { useAction } from '../../../components/use-action';
+import { loadPhase } from '../../../lib/load-state';
 import { DraftTextarea } from '../../../components/draft-textarea';
 import { clearDraft, readDraft } from '../../../lib/draft-field';
 import { relativeAge } from '../../../lib/format';
@@ -33,12 +34,14 @@ export default function IdeaPage() {
   const [writingOwn, setWritingOwn] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const action = useAction();
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const ownRef = useRef<HTMLTextAreaElement>(null);
 
   const load = useCallback(async () => {
     try {
       const result = await api.get<SessionView>(`/api/ideas/${sessionId}`);
       setView(result);
+      setLoadedFor(sessionId);
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));
@@ -79,7 +82,17 @@ export default function IdeaPage() {
     });
   }
 
-  if (!view) return <div className="page">{error ? <ErrorText>{error}</ErrorText> : 'Reading the idea.'}</div>;
+  const phase = loadPhase({ key: sessionId, loadedFor, error });
+  if (phase !== 'ready' || !view) {
+    return (
+      <div className="page enter">
+        <span className="meta" onClick={() => router.push('/stories')} style={{ cursor: 'pointer', color: 'var(--text-accent)' }}>
+          ← All stories
+        </span>
+        {phase === 'failed' ? <ErrorText>{error}</ErrorText> : <Loading label="Reading the idea" shape="block" rows={2} />}
+      </div>
+    );
+  }
 
   const { session, currentRound, history, drafts } = view;
   const answered = currentRound.filter((question) => question.answeredAt).length;

@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { api, type Task } from '../lib/api';
-import { Button, Card, Empty, ErrorText } from './ui';
+import { Button, Card, Empty, ErrorText, Loading } from './ui';
 import { useAction } from './use-action';
+import { loadPhase } from '../lib/load-state';
 
 /**
  * The report, and the one decision that follows it.
@@ -15,12 +16,15 @@ export function ReportView({ taskId, task, onChanged }: { taskId: string; task: 
   const [report, setReport] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const action = useAction();
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
         const result = await api.get<{ report: string | null }>(`/api/tasks/${taskId}/final-report`);
         setReport(result.report);
+        setLoadedFor(taskId);
+        setError(null);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : String(loadError));
       }
@@ -34,6 +38,8 @@ export function ReportView({ taskId, task, onChanged }: { taskId: string; task: 
       await onChanged();
     });
   }
+
+  const phase = loadPhase({ key: taskId, loadedFor, error });
 
   return (
     <div className="stack">
@@ -58,7 +64,9 @@ export function ReportView({ taskId, task, onChanged }: { taskId: string; task: 
         </Card>
       ) : null}
 
-      {report ? (
+      {phase === 'loading' ? (
+        <Loading label="Reading the report" shape="block" rows={1} />
+      ) : phase === 'failed' ? null : report ? (
         <Card>
           <span className="meta">Final report · computed, not narrated</span>
           <div className="log" style={{ maxHeight: 'none' }}>

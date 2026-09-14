@@ -4,12 +4,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, type IdeaSession, type StoryDraft, type Task } from '../../lib/api';
 import { useProjects } from '../../components/shell';
-import { Button, Card, Dialog, Empty, ErrorText, Field, StateBadge, Tile } from '../../components/ui';
+import { Button, Card, Dialog, Empty, ErrorText, Field, Loading, StateBadge, Tile } from '../../components/ui';
 import { DraftTextarea } from '../../components/draft-textarea';
 import { useAction } from '../../components/use-action';
 import { clearDraft, readDraft } from '../../lib/draft-field';
 import { relativeAge } from '../../lib/format';
 import { explainState } from '../../lib/labels';
+import { loadPhase } from '../../lib/load-state';
 
 type Filter = 'all' | 'waiting' | 'running' | 'done';
 
@@ -36,7 +37,7 @@ function matches(filter: Filter, state: string): boolean {
  * review, and an idea described in one line sent the research pass off to guess.
  */
 export default function StoriesPage() {
-  const { project } = useProjects();
+  const { project, loading: shellLoading } = useProjects();
   const router = useRouter();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [drafts, setDrafts] = useState<StoryDraft[]>([]);
@@ -46,6 +47,12 @@ export default function StoriesPage() {
   const [editing, setEditing] = useState<StoryDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const action = useAction();
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const key = project?.id ?? null;
+  // The project on screen now, read after each await: a response for a project
+  // switched away from must not land on the one switched to.
+  const keyRef = useRef(key);
+  keyRef.current = key;
   const ideaRef = useRef<HTMLTextAreaElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
@@ -62,17 +69,21 @@ export default function StoriesPage() {
 
   const load = useCallback(async () => {
     if (!project) return;
+    const requested = project.id;
     try {
       const [taskResult, draftResult, sessionResult] = await Promise.all([
         api.get<{ tasks: Task[] }>(`/api/tasks?projectId=${project.id}`),
         api.get<{ drafts: StoryDraft[] }>(`/api/drafts?projectId=${project.id}`),
         api.get<{ sessions: IdeaSession[] }>(`/api/ideas?projectId=${project.id}`),
       ]);
+      if (keyRef.current !== requested) return;
       setTasks(taskResult.tasks);
       setDrafts(draftResult.drafts);
       setSessions(sessionResult.sessions.filter((session) => session.status !== 'READY'));
+      setLoadedFor(requested);
       setError(null);
     } catch (loadError) {
+      if (keyRef.current !== requested) return;
       setError(loadError instanceof Error ? loadError.message : String(loadError));
     }
   }, [project]);
@@ -129,6 +140,10 @@ export default function StoriesPage() {
   const visible = tasks.filter((task) => matches(filter, task.state));
   const waiting = tasks.filter((task) => explainState(task.state).tone === 'waiting').length;
   const active = tasks.filter((task) => explainState(task.state).tone === 'running').length;
+  const phase = loadPhase({ shellLoading, key, loadedFor, error });
+  const waitingForData = phase === 'loading' || phase === 'failed';
+  /** A count the page does not have yet is not zero. */
+  const count = (value: number) => (phase === 'failed' ? '—' : value);
 
   return (
     <div className="page enter">
@@ -151,13 +166,23 @@ export default function StoriesPage() {
       {action.error ? <ErrorText>{action.error}</ErrorText> : null}
 
       <div className="tiles">
-        <Tile value={waiting} label="Waiting for you" tone={waiting > 0 ? 'attention' : undefined} />
-        <Tile value={active} label="Running" />
-        <Tile value={drafts.length} label="Drafts not started" tone="caution" />
-        <Tile value={tasks.filter((task) => task.state === 'COMPLETED').length} label="Finished" tone="positive" />
+        <Tile
+          value={count(waiting)}
+          label="Waiting for you"
+          tone={waiting > 0 ? 'attention' : undefined}
+          loading={phase === 'loading'}
+        />
+        <Tile value={count(active)} label="Running" loading={phase === 'loading'} />
+        <Tile value={count(drafts.length)} label="Drafts not started" tone="caution" loading={phase === 'loading'} />
+        <Tile
+          value={count(tasks.filter((task) => task.state === 'COMPLETED').length)}
+          label="Finished"
+          tone="positive"
+          loading={phase === 'loading'}
+        />
       </div>
 
-      {sessions.length > 0 ? (
+      {!waitingForData && sessions.length > 0 ? (
         <section className="stack">
           <h2 className="subhead">Ideas being shaped</h2>
           <div className="list">
@@ -187,7 +212,7 @@ export default function StoriesPage() {
         </section>
       ) : null}
 
-      {drafts.length > 0 ? (
+      {!waitingForData && drafts.length > 0 ? (
         <section className="stack">
           <div className="row-between">
             <h2 className="subhead">Drafts</h2>
@@ -250,7 +275,9 @@ export default function StoriesPage() {
           </div>
         </div>
 
-        {visible.length === 0 ? (
+        {phase === 'loading' ? (
+          <Loading label="Reading the stories" rows={3} />
+        ) : phase === 'failed' ? null : visible.length === 0 ? (
           <Empty>
             {tasks.length === 0
               ? 'No story has been started in this project yet.'

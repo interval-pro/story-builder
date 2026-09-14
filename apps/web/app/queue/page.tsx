@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, type QueueEntry, type QueueView } from '../../lib/api';
-import { Alert, Button, Card, Empty, ErrorText, StateBadge, Tile } from '../../components/ui';
+import { Alert, Button, Card, Empty, ErrorText, Loading, StateBadge, Tile } from '../../components/ui';
 import { useAction } from '../../components/use-action';
+import { loadPhase } from '../../lib/load-state';
 import { formatDuration, relativeAge } from '../../lib/format';
 import { jobLabel } from '../../lib/labels';
 
@@ -27,11 +28,13 @@ export default function QueuePage() {
   // The poll clears `error`, which is why a failed action is kept apart in `action.error`.
   const [error, setError] = useState<string | null>(null);
   const action = useAction();
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const result = await api.get<QueueView>('/api/queue');
       setView(result);
+      setLoadedFor('queue');
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));
@@ -90,7 +93,15 @@ export default function QueuePage() {
     });
   }
 
-  if (!view) return <div className="page">{error ? <ErrorText>{error}</ErrorText> : 'Reading the queue.'}</div>;
+  const phase = loadPhase({ key: 'queue', loadedFor, error });
+  if (phase !== 'ready' || !view) {
+    return (
+      <div className="page enter">
+        <h1 className="display">Queue</h1>
+        {phase === 'failed' ? <ErrorText>{error}</ErrorText> : <Loading label="Reading the queue" rows={3} />}
+      </div>
+    );
+  }
 
   const paused = view.policy.paused;
 

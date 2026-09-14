@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type Project } from '../../lib/api';
 import { useProjects } from '../../components/shell';
-import { Alert, Badge, Button, Card, Dialog, Empty, ErrorText, Field, KeyValue } from '../../components/ui';
+import { Alert, Badge, Button, Card, Dialog, Empty, ErrorText, Field, KeyValue, Loading } from '../../components/ui';
 import { useAction } from '../../components/use-action';
+import { loadPhase } from '../../lib/load-state';
 import { relativeAge } from '../../lib/format';
 
 const SETUP_TONES: Record<Project['setupState'], 'waiting' | 'running' | 'done' | 'critical'> = {
@@ -50,6 +51,7 @@ export default function ProjectsPage() {
   const [removing, setRemoving] = useState<Project | null>(null);
   const [error, setError] = useState<string | null>(null);
   const action = useAction();
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const pathRef = useRef<HTMLInputElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
 
@@ -57,6 +59,7 @@ export default function ProjectsPage() {
     try {
       const result = await api.get<{ projects: Project[] }>('/api/projects');
       setProjects(result.projects);
+      setLoadedFor('projects');
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));
@@ -128,6 +131,7 @@ export default function ProjectsPage() {
 
   const work = projects.filter((project) => project.kind === 'PROJECT');
   const installation = projects.find((project) => project.kind === 'INSTALLATION') ?? null;
+  const phase = loadPhase({ key: 'projects', loadedFor, error });
 
   return (
     <div className="page enter">
@@ -145,7 +149,9 @@ export default function ProjectsPage() {
       {error ? <ErrorText>{error}</ErrorText> : null}
       {action.error ? <ErrorText>{action.error}</ErrorText> : null}
 
-      {work.length === 0 ? (
+      {phase === 'loading' ? (
+        <Loading label="Reading the projects" shape="card" rows={2} />
+      ) : phase === 'failed' ? null : work.length === 0 ? (
         <Empty>No project yet. Add the directory of a Git repository with at least one commit.</Empty>
       ) : (
         <div className="grid">
@@ -246,7 +252,7 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      {installation ? (
+      {phase === 'ready' && installation ? (
         <Card tone="olive">
           <span className="meta" style={{ color: 'rgba(242,229,200,0.82)' }}>
             The engine itself

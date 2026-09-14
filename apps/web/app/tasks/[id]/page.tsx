@@ -12,8 +12,9 @@ import {
   type Task,
   type TaskProgress,
 } from '../../../lib/api';
-import { Alert, Button, Card, Empty, ErrorText, Spinner, StateBadge, Tabs } from '../../../components/ui';
+import { Alert, Button, Card, Empty, ErrorText, Loading, Spinner, StateBadge, Tabs } from '../../../components/ui';
 import { useAction } from '../../../components/use-action';
+import { loadPhase } from '../../../lib/load-state';
 import { StoryProgress } from '../../../components/story-progress';
 import { PlanView } from '../../../components/plan-view';
 import { WorkView } from '../../../components/work-view';
@@ -105,6 +106,7 @@ export default function StoryPage() {
   // in `action.error` instead, so the next poll cannot erase it before it is read.
   const [error, setError] = useState<string | null>(null);
   const action = useAction();
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -116,6 +118,7 @@ export default function StoryPage() {
       setDetail(detailResult);
       setReview(reviewResult);
       setProgress(progressResult.progress);
+      setLoadedFor(taskId);
       setError(null);
       setUnreachable(false);
     } catch (loadError) {
@@ -178,8 +181,21 @@ export default function StoryPage() {
     }
   }
 
-  if (error && !detail) return <div className="page"><ErrorText>{error}</ErrorText></div>;
-  if (!detail) return <div className="page">Reading this story.</div>;
+  const phase = loadPhase({ key: taskId, loadedFor, error });
+  if (phase !== 'ready' || !detail) {
+    return (
+      <div className="page enter">
+        <span
+          className="meta"
+          onClick={() => router.push('/stories')}
+          style={{ cursor: 'pointer', color: 'var(--text-accent)' }}
+        >
+          ← All stories
+        </span>
+        {phase === 'failed' ? <ErrorText>{error}</ErrorText> : <Loading label="Reading this story" shape="block" rows={2} />}
+      </div>
+    );
+  }
 
   const { task } = detail;
   const explanation = explainState(task.state);

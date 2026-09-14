@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type SettingDescriptor } from '../../lib/api';
-import { Badge, Button, Card, Empty, ErrorText, Field } from '../../components/ui';
+import { Badge, Button, Card, ErrorText, Field, Loading } from '../../components/ui';
 import { useProjects } from '../../components/shell';
 import { useAction } from '../../components/use-action';
+import { loadPhase } from '../../lib/load-state';
 
 const GROUPS: { key: string; title: string; standfirst: string }[] = [
   {
@@ -66,13 +67,21 @@ export default function SettingsPage() {
 
   const perProject = scope !== 'installation';
   const path = perProject ? `/api/projects/${encodeURIComponent(scope)}/settings` : '/api/settings';
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  // The scope on screen now. Every response is checked against it, so the values
+  // of a scope switched away from never land on the one switched to.
+  const pathRef = useRef(path);
+  pathRef.current = path;
 
   const load = useCallback(async () => {
     try {
       const result = await api.get<{ settings: SettingDescriptor[] }>(path);
+      if (pathRef.current !== path) return;
       setSettings(result.settings);
+      setLoadedFor(path);
       setError(null);
     } catch (loadError) {
+      if (pathRef.current !== path) return;
       setError(loadError instanceof Error ? loadError.message : String(loadError));
     }
   }, [path]);
@@ -86,7 +95,9 @@ export default function SettingsPage() {
     if (Object.keys(edits).length === 0) return;
     void action.run('save', 'Saving the settings', async () => {
       const result = await api.put<{ settings: SettingDescriptor[] }>(path, { values: edits });
+      if (pathRef.current !== path) return;
       setSettings(result.settings);
+      setLoadedFor(path);
       setEdits({});
       setSaved(true);
       setError(null);
@@ -97,7 +108,9 @@ export default function SettingsPage() {
   function clear(key: string) {
     void action.run(`clear:${key}`, 'Resetting the setting', async () => {
       const result = await api.delete<{ settings: SettingDescriptor[] }>(`${path}/${encodeURIComponent(key)}`);
+      if (pathRef.current !== path) return;
       setSettings(result.settings);
+      setLoadedFor(path);
       setEdits((current) => {
         const next = { ...current };
         delete next[key];
@@ -169,6 +182,7 @@ export default function SettingsPage() {
   }
 
   const dirty = Object.keys(edits).length;
+  const phase = loadPhase({ key: path, loadedFor, error });
 
   return (
     <div className="page enter">
@@ -214,9 +228,9 @@ export default function SettingsPage() {
       {action.error ? <ErrorText>{action.error}</ErrorText> : null}
       {saved ? <span className="meta">Saved.</span> : null}
 
-      {settings.length === 0 ? <Empty>Reading the settings.</Empty> : null}
+      {phase === 'loading' ? <Loading label="Reading the settings" shape="block" rows={3} /> : null}
 
-      {GROUPS.map((group) => {
+      {(phase === 'ready' ? GROUPS : []).map((group) => {
         const own = settings.filter((setting) => setting.group === group.key);
         if (own.length === 0) return null;
         return (
