@@ -21,7 +21,6 @@ import {
   ReviewRepository,
   SettingsRepository,
   RuntimeManifestRepository,
-  SandboxRepository,
   StoryRepository,
   TaskDependencyRepository,
   TaskRepository,
@@ -42,7 +41,6 @@ export interface Repositories {
   approvals: ApprovalRepository;
   agents: AgentRepository;
   artifacts: ArtifactRepository;
-  sandboxes: SandboxRepository;
   testRuns: TestRunRepository;
   qaRuns: QaRunRepository;
   metrics: MetricRepository;
@@ -78,7 +76,6 @@ export function createRepositories(db: Queryable): Repositories {
     approvals: new ApprovalRepository(db),
     agents: new AgentRepository(db),
     artifacts: new ArtifactRepository(db),
-    sandboxes: new SandboxRepository(db),
     testRuns: new TestRunRepository(db),
     qaRuns: new QaRunRepository(db),
     metrics: new MetricRepository(db),

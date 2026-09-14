@@ -89,7 +89,7 @@ const SPECS: StepSpec[] = [
   {
     key: 'implementation',
     label: 'Implementation',
-    purpose: 'Writes the change in its own worktree, nowhere near your checkout.',
+    purpose: 'Writes the change on its own branch, in the project directory.',
     phase: 'IMPLEMENTATION',
     states: ['REVIEW_APPROVED', 'IMPLEMENTATION_QUEUED', 'IMPLEMENTING', 'FIX_REQUIRED', 'FIXING', 'WAITING_FOR_TASK'],
   },

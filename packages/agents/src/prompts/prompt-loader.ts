@@ -26,7 +26,7 @@ const FALLBACK_PROMPTS: Record<AgentType, string> = {
     'never use confidence percentages. Human notes are corrections, not suggestions.',
   implementation:
     '# Implementation Agent\n\nYou are the Implementation Agent. Implement exactly the approved review ' +
-    'inside the task sandbox. Never silently widen the approved scope; report anything the human did ' +
+    'on the story\'s own branch. Never silently widen the approved scope; report anything the human did ' +
     'not approve as a discovered issue. Verify the build and tests before reporting success.',
   qa:
     '# QA Agent\n\nYou are the QA Agent. Review the diff independently for correctness, regressions, ' +
@@ -60,6 +60,3 @@ export async function loadAgentPrompt(type: AgentType, installRoot?: string): Pr
   }
 }
 
-export function clearPromptCache(): void {
-  cache.clear();
-}

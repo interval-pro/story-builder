@@ -28,8 +28,7 @@ const CHAT_FORBIDDEN_COMMANDS = ['Bash(sudo:*)', 'Bash(rm -rf /:*)'];
 
 /**
  * Delegation. Each subagent opens its own context window, and none of the five
- * agents has a reason to delegate: each has a narrow job, its own prompt and its
- * own worktree. `Agent` and `Task` are the same tool under two names across CLI
+ * agents has a reason to delegate: each has a narrow job and its own prompt. `Agent` and `Task` are the same tool under two names across CLI
  * versions, and the rest only mean anything once a subagent exists. Denying a
  * name this CLI does not have costs nothing; missing one defeats the purpose.
  */
@@ -160,9 +159,4 @@ export function answerPassPolicy(options: PolicyOptions = {}): PhasePolicy {
     disallowedTools: [...ANSWER_PASS_TOOLS, ...overheadTools(options)],
     ...(options.effort ? { effort: options.effort } : {}),
   };
-}
-
-/** True when the phase must not be able to change a single file. */
-export function isReadOnlyPhase(phase: ExecutionPhase): boolean {
-  return ['RESEARCH', 'REVIEW', 'QA', 'FINAL_REPORT', 'PUSH'].includes(phase);
 }

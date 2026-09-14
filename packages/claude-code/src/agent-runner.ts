@@ -11,7 +11,7 @@ import type { ClaudeStreamEvent } from './types';
 const logger = createLogger('claude-code-runner');
 
 export interface ClaudeCodeRunnerOptions {
-  /** The task worktree. The CLI never sees anything outside it. */
+  /** The project directory the session runs in, on the story's branch. */
   workspacePath: string;
   model?: string;
   binary?: string;
@@ -32,7 +32,7 @@ export interface ClaudeCodeRunnerOptions {
    */
   allowSubagents?: boolean;
   /**
-   * Directories outside the worktree the work pass may read, passed as
+   * Directories outside the project the work pass may read, passed as
    * `--add-dir`. Used to hand an agent an artifact it would otherwise be sent
    * inline on every run.
    */
@@ -50,7 +50,7 @@ export interface ClaudeCodeRunnerOptions {
 
 
 /**
- * Runs each agent as a headless Claude Code session inside the task worktree.
+ * Runs each agent as a headless Claude Code session in the project directory.
  * The work happens in one session; the machine readable result is asked for in
  * a second, resumed call with every tool switched off, so a tool call can never
  * be mistaken for the answer.

@@ -1,62 +1,7 @@
-import { newId, NotFoundError } from '@ai-engine/shared';
-import type { Metric, QaFinding, QaNote, QaRun, Sandbox, TestRun } from '@ai-engine/domain';
+import { newId } from '@ai-engine/shared';
+import type { Metric, QaFinding, QaNote, QaRun, TestRun } from '@ai-engine/domain';
 import type { Queryable } from '../client';
 import { camelize, camelizeAll } from '../mapping';
-
-const SANDBOX_COLUMNS = `id, task_id, workspace_path, container_id, container_name, image, status, mode,
-  created_at, updated_at`;
-
-export class SandboxRepository {
-  constructor(private readonly db: Queryable) {}
-
-  async create(input: {
-    taskId: string;
-    workspacePath: string;
-    image: string;
-    mode: Sandbox['mode'];
-    containerName?: string | null;
-  }): Promise<Sandbox> {
-    const row = await this.db.queryOne(
-      `INSERT INTO sandboxes (id, task_id, workspace_path, image, mode, container_name)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${SANDBOX_COLUMNS}`,
-      [newId(), input.taskId, input.workspacePath, input.image, input.mode, input.containerName ?? null],
-    );
-    return camelize<Sandbox>(row!);
-  }
-
-  async update(
-    id: string,
-    patch: Partial<Pick<Sandbox, 'containerId' | 'containerName' | 'status' | 'mode'>>,
-  ): Promise<Sandbox> {
-    const row = await this.db.queryOne(
-      `UPDATE sandboxes SET
-         container_id = COALESCE($2, container_id),
-         container_name = COALESCE($3, container_name),
-         status = COALESCE($4, status),
-         mode = COALESCE($5, mode),
-         updated_at = now()
-       WHERE id = $1 RETURNING ${SANDBOX_COLUMNS}`,
-      [id, patch.containerId ?? null, patch.containerName ?? null, patch.status ?? null, patch.mode ?? null],
-    );
-    if (!row) throw new NotFoundError('Sandbox', id);
-    return camelize<Sandbox>(row);
-  }
-
-  async findActiveByTask(taskId: string): Promise<Sandbox | null> {
-    const row = await this.db.queryOne(
-      `SELECT ${SANDBOX_COLUMNS} FROM sandboxes WHERE task_id = $1 AND status <> 'DESTROYED'
-       ORDER BY created_at DESC LIMIT 1`,
-      [taskId],
-    );
-    return row ? camelize<Sandbox>(row) : null;
-  }
-
-  async listActive(): Promise<Sandbox[]> {
-    return camelizeAll<Sandbox>(
-      await this.db.query(`SELECT ${SANDBOX_COLUMNS} FROM sandboxes WHERE status NOT IN ('DESTROYED', 'STOPPED')`),
-    );
-  }
-}
 
 const TEST_COLUMNS = 'id, task_id, run_id, command, exit_code, passed, duration_ms, log_artifact_id, created_at';
 

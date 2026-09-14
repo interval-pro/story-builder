@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { answerPassPolicy, isReadOnlyPhase, policyForPhase } from '../src/phase-policy.ts';
+import { answerPassPolicy, policyForPhase } from '../src/phase-policy.ts';
 import { EXECUTION_PHASES } from '@ai-engine/domain';
 
 const ALL_PHASES = ['RESEARCH', 'REVIEW', 'IMPLEMENTATION', 'QA', 'FINAL_REPORT', 'INTEGRATION', 'PUSH'] as const;
@@ -130,13 +130,6 @@ test('no phase is allowed to write and push at the same time', () => {
     const canPush = !policy.disallowedTools?.some((entry) => entry.includes('git push'));
     assert.equal(canWrite && canPush, false, `${phase} must not be able to both write and push`);
   }
-});
-
-test('the read-only phases are exactly the ones that produce documents', () => {
-  assert.equal(isReadOnlyPhase('RESEARCH'), true);
-  assert.equal(isReadOnlyPhase('QA'), true);
-  assert.equal(isReadOnlyPhase('IMPLEMENTATION'), false);
-  assert.equal(isReadOnlyPhase('INTEGRATION'), false);
 });
 
 test('intake reads the project and cannot write to it', () => {

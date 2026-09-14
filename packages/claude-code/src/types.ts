@@ -1,5 +1,5 @@
 export interface ClaudeCliOptions {
-  /** Absolute path the CLI runs in. This is the task worktree. */
+  /** Absolute path the CLI runs in: the project directory. */
   cwd: string;
   prompt: string;
   appendSystemPrompt?: string;

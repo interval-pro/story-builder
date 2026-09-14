@@ -61,14 +61,6 @@ export const HUMAN_GATE_STATES: readonly TaskState[] = [
   'PR_APPROVAL_REQUIRED',
 ] as const;
 
-/** States in which agents are allowed to write inside the task sandbox. */
-export const WRITE_ENABLED_STATES: readonly TaskState[] = [
-  'IMPLEMENTING',
-  'FIXING',
-  'INTEGRATION_VALIDATION',
-  'PUSHING',
-] as const;
-
 const BASE_TRANSITIONS: Record<TaskState, TaskState[]> = {
   DRAFT: ['ANALYSIS_QUEUED'],
   ANALYSIS_QUEUED: ['ANALYZING'],
@@ -164,14 +156,6 @@ export function assertTransition(from: TaskState, to: TaskState): void {
 
 export function isTerminal(state: TaskState): boolean {
   return TERMINAL_STATES.includes(state);
-}
-
-export function isHumanGate(state: TaskState): boolean {
-  return HUMAN_GATE_STATES.includes(state);
-}
-
-export function allowsWorkspaceWrites(state: TaskState): boolean {
-  return WRITE_ENABLED_STATES.includes(state);
 }
 
 export function transitionsFrom(state: TaskState): TaskState[] {

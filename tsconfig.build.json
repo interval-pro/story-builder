@@ -21,7 +21,6 @@
     { "path": "apps/orchestrator" },
     { "path": "apps/worker" },
     { "path": "apps/api" },
-    { "path": "apps/sandbox-manager" },
     { "path": "apps/cli" }
   ]
 }

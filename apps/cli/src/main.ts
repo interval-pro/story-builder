@@ -1,14 +1,7 @@
 import path from 'node:path';
 import { failure, heading, info } from './output';
 import { initCommand } from './commands/init';
-import {
-  exportCommand,
-  importCommand,
-  startCommand,
-  statusCommand,
-  stopCommand,
-  versionCommand,
-} from './commands/lifecycle';
+import { exportCommand, importCommand, statusCommand, versionCommand } from './commands/lifecycle';
 import { storyCreateCommand, taskListCommand, taskShowCommand } from './commands/story';
 
 interface ParsedArgs {
@@ -42,10 +35,8 @@ function parseArgs(argv: string[]): ParsedArgs {
 function usage(): void {
   heading('ai-engine');
   info(`
-  ai-engine init [--repo <path>] [--skip-docker]   Register the installation, optionally with a project
+  ai-engine init                                   Register the installation (dev-up.sh does this)
   ai-engine version                                Show the installed version and upstream drift
-  ai-engine start                                  Start the stack with docker compose
-  ai-engine stop                                   Stop the stack
   ai-engine status [--project <name>]              Show system and task status
   ai-engine story create --body "..." [--title t] [--installation] [--project name]
   ai-engine task list [--project name]
@@ -59,25 +50,17 @@ function usage(): void {
 
 async function main(): Promise<number> {
   const { command, positional, flags } = parseArgs(process.argv.slice(2));
-  // A repository is optional: an installation serves as many projects as are
-  // added to it from the cockpit, so `init` with none is the normal first step.
-  const repoFlag = flags['repo'] ?? process.env['PROJECT_ROOT'];
-  const repoPath = typeof repoFlag === 'string' && repoFlag.length > 0 ? path.resolve(repoFlag) : null;
   const installRoot = path.resolve(String(flags['install-root'] ?? process.env['INSTALL_ROOT'] ?? process.cwd()));
   // Which project a command is about, when the installation serves several.
   const project = typeof flags['project'] === 'string' ? flags['project'] : undefined;
 
   switch (command) {
     case 'init':
-      return initCommand({ repoPath, installRoot, skipDocker: Boolean(flags['skip-docker']) });
+      return initCommand({ installRoot });
     case 'version':
       return versionCommand();
-    case 'start':
-      return startCommand(repoPath ?? installRoot);
-    case 'stop':
-      return stopCommand(repoPath ?? installRoot);
     case 'status':
-      return statusCommand(repoPath ?? installRoot, { project });
+      return statusCommand({ project });
     case 'story': {
       const sub = positional[0];
       if (sub !== 'create') {
@@ -116,13 +99,15 @@ async function main(): Promise<number> {
       return importCommand(path.resolve(source), { project });
     }
     case 'update':
-      info('\nUpdate from the cockpit: System Status shows an update button whenever the installation is');
-      info('behind the newest release. It stops the services, fetches the release, rebuilds, migrates, runs');
-      info('the tests and starts everything again, restoring the current version if any step fails.\n');
+      info('\nUpdate from the cockpit: the System screen offers an update whenever a newer release exists. It');
+      info('builds the release while the current version keeps running, and only then snapshots the database,');
+      info('stops the services, migrates, runs the tests and starts again, restoring the running version if');
+      info('any step fails.\n');
       return 0;
     case 'rollback':
-      info('\nCheck the previous release tag out inside the installation, rebuild it and restore the state');
-      info('snapshot taken before the upgrade.\n');
+      info('\nA rebuild or an update that fails rolls itself back to the commit that was running, restoring');
+      info('the database snapshot if the migration had already run. To go back further by hand:');
+      info('  git checkout <tag> && ./scripts/build.sh && ./scripts/dev-down.sh && ./scripts/dev-up.sh\n');
       return 0;
     case 'help':
     case '--help':

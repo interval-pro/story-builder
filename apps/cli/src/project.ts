@@ -27,7 +27,7 @@ export async function resolveProject(
 
   const projects = await repos.projects.listWorkProjects();
   if (projects.length === 0) {
-    failure('No project is registered. Add one from the cockpit, or run "ai-engine init --repo <path>".');
+    failure('No project is registered. Add one from the Projects screen in the cockpit.');
     return null;
   }
 

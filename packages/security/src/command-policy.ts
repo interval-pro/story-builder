@@ -64,6 +64,3 @@ export function assertCommandAllowed(command: string, mode: 'safe' | 'full'): vo
   }
 }
 
-export function isSafeBinary(binary: string): boolean {
-  return SAFE_COMMANDS.has(binary);
-}

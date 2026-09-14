@@ -4,6 +4,5 @@ export * from './logger';
 export * from './config';
 export * from './time';
 export * from './text';
-export * from './result';
 export * from './http';
 export * from './paths';

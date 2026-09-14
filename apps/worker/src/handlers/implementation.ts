@@ -90,9 +90,9 @@ async function shouldContinueSession(context: JobContext): Promise<{ resume: boo
 }
 
 /**
- * Runs the implementation agent inside a writable sandbox. Everything it does
- * stays in the task worktree; nothing is pushed and nothing touches the
- * developer's working copy.
+ * Runs the implementation agent on the story's branch, in the project directory.
+ * Everything it does is committed to that branch; nothing is pushed and nothing
+ * reaches the work branch until a person merges it.
  */
 export async function handleImplementation(context: JobContext, mode: 'IMPLEMENTATION' | 'FIX'): Promise<void> {
   await takeDirectory(context);

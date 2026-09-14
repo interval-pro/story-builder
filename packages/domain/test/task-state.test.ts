@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  allowsWorkspaceWrites,
   assertTransition,
   canTransition,
-  isHumanGate,
+  HUMAN_GATE_STATES,
   isTerminal,
   transitionsFrom,
 } from '../src/task-state.ts';
@@ -55,17 +54,10 @@ test('a paused task can return to the state it was paused from', () => {
   assert.equal(canTransition('PAUSED', 'ROLLED_BACK'), false);
 });
 
-test('writes are only enabled after approval', () => {
-  assert.equal(allowsWorkspaceWrites('ANALYZING'), false);
-  assert.equal(allowsWorkspaceWrites('REVIEW_READY'), false);
-  assert.equal(allowsWorkspaceWrites('IMPLEMENTING'), true);
-  assert.equal(allowsWorkspaceWrites('FIXING'), true);
-});
-
 test('human gates and terminal states are classified', () => {
-  assert.ok(isHumanGate('REVIEW_READY'));
-  assert.ok(isHumanGate('FINAL_REVIEW_READY'));
-  assert.equal(isHumanGate('IMPLEMENTING'), false);
+  assert.ok(HUMAN_GATE_STATES.includes('REVIEW_READY'));
+  assert.ok(HUMAN_GATE_STATES.includes('FINAL_REVIEW_READY'));
+  assert.equal(HUMAN_GATE_STATES.includes('IMPLEMENTING'), false);
   assert.ok(isTerminal('COMPLETED'));
   assert.equal(isTerminal('BLOCKED'), false);
 });

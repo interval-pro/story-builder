@@ -7,7 +7,7 @@ export interface ToolContext {
   projectId: string;
   taskId: string;
   runId: string;
-  /** Absolute path of the task workspace (a Git worktree). */
+  /** Absolute path of the project directory the story works in. */
   workspacePath: string;
   phase: ExecutionPhase;
   capabilities: readonly Capability[];

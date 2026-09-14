@@ -55,7 +55,7 @@ done
 # process's working directory, so only this checkout's services are touched.
 # ps rather than pgrep: on at least one macOS install pgrep fails with "sysmond
 # service not found" and matches nothing while reading as if it had run.
-for pattern in "apps/api/dist/main.js" "apps/orchestrator/dist/main.js" "apps/worker/dist/main.js" "apps/sandbox-manager/dist/main.js" "next start"; do
+for pattern in "apps/api/dist/main.js" "apps/orchestrator/dist/main.js" "apps/worker/dist/main.js" "next start"; do
   pids="$(ps -Ao pid=,command= | grep -F "$pattern" | grep -v -F grep | awk '{print $1}' || true)"
   for pid in $pids; do
     owned_by_checkout "$pid" "$ROOT" && stop_pid "$pid" "stray ${pattern%% *}"

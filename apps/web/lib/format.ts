@@ -71,14 +71,6 @@ export function relativeAge(iso: string | null, now: number = Date.now()): strin
   return 'just now';
 }
 
-/** A clock time, for a log line where the date is already obvious. */
-export function formatTime(iso: string | null): string {
-  if (!iso) return '—';
-  const parsed = new Date(iso);
-  if (Number.isNaN(parsed.getTime())) return '—';
-  return parsed.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
 /** A date and time, written the way the design system writes dates. */
 export function formatStamp(iso: string | null): string {
   if (!iso) return '—';

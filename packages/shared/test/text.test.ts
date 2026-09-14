@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { extractJson, truncate, countLines, indent } from '../src/text.ts';
 import { backoffMs, retry } from '../src/time.ts';
-import { slugify, sha256, shortHash } from '../src/ids.ts';
+import { slugify, sha256 } from '../src/ids.ts';
 
 test('JSON is extracted from a fenced block', () => {
   const raw = 'Here you go:\n```json\n{"a": 1}\n```\nThat is all.';
@@ -78,7 +78,6 @@ test('branch slugs are safe and bounded', () => {
 test('hashes are stable', () => {
   assert.equal(sha256('a'), sha256('a'));
   assert.notEqual(sha256('a'), sha256('b'));
-  assert.equal(shortHash('a').length, 12);
 });
 
 test('line counting and indentation behave', () => {

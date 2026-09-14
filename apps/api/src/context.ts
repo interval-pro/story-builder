@@ -83,11 +83,3 @@ export async function resolveProjectId(context: ApiContext, override?: string | 
   );
 }
 
-/** The installation itself, as a project. Stories against it change the engine. */
-export async function installationProjectId(context: ApiContext): Promise<string> {
-  const installation = await context.repos.projects.findInstallation();
-  if (!installation) {
-    throw new ValidationError('This installation is not registered as a project. Run "ai-engine init" again.');
-  }
-  return installation.id;
-}

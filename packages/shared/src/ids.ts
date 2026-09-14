@@ -10,11 +10,6 @@ export function sha256(input: string): string {
   return createHash('sha256').update(input, 'utf8').digest('hex');
 }
 
-/** Short, human readable fingerprint of a longer hash. */
-export function shortHash(input: string): string {
-  return sha256(input).slice(0, 12);
-}
-
 /** Deterministic slug used for branch names and directories. */
 export function slugify(value: string, maxLength = 48): string {
   const slug = value

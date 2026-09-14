@@ -11,7 +11,7 @@ export interface ManifestValidationResult {
 }
 
 /**
- * A manifest is only trusted after its commands actually ran in a sandbox.
+ * A manifest is only trusted after its commands actually ran.
  * Detection alone is a guess.
  */
 export async function validateRuntimeManifest(

@@ -44,18 +44,6 @@ export class SecretsService {
     }
     return values;
   }
-
-  /** Environment variables that may be injected into a task sandbox. */
-  sandboxEnvironment(scopes: SecretScope[]): Record<string, string> {
-    const environment: Record<string, string> = {};
-    for (const definition of this.definitions.values()) {
-      if (!scopes.includes(definition.scope)) continue;
-      if (definition.scope === 'production') continue;
-      const value = process.env[definition.envVar];
-      if (value) environment[definition.envVar] = value;
-    }
-    return environment;
-  }
 }
 
 export const DEFAULT_SECRETS: SecretDefinition[] = [

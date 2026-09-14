@@ -297,13 +297,6 @@ export interface ArtifactRecord {
   kind: string;
   contentType: string;
   sizeBytes: number;
-  /**
-   * Where the bytes used to live, for rows written before artifacts moved into
-   * the database. Null for everything since, and nothing reads it: it is kept so
-   * an upgraded installation can say where an old artifact was rather than
-   * pretending it never existed.
-   */
-  storagePath: string | null;
   checksum: string | null;
   metadata: Record<string, unknown>;
   createdAt: string;
@@ -369,15 +362,6 @@ export interface ImpactManifest {
   createdAt: string;
 }
 
-export interface ImpactResourceRow {
-  id: string;
-  manifestId: string;
-  kind: ImpactResourceKind;
-  identifier: string;
-  access: 'read' | 'write';
-  source: string;
-}
-
 export interface TaskConflict {
   id: string;
   taskId: string;
@@ -398,19 +382,6 @@ export interface ResourceLock {
   mode: 'HARD' | 'SOFT';
   acquiredAt: string;
   releasedAt: string | null;
-}
-
-export interface Sandbox {
-  id: string;
-  taskId: string;
-  workspacePath: string;
-  containerId: string | null;
-  containerName: string | null;
-  image: string;
-  status: 'CREATING' | 'RUNNING' | 'PAUSED' | 'STOPPED' | 'DESTROYED' | 'ERROR';
-  mode: 'READ_ONLY' | 'READ_WRITE';
-  createdAt: string;
-  updatedAt: string;
 }
 
 export interface TestRun {

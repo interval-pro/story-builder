@@ -2,10 +2,6 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export function nowIso(): string {
-  return new Date().toISOString();
-}
-
 /** Exponential backoff with jitter, used by queue retries and provider calls. */
 export function backoffMs(attempt: number, baseMs = 1000, maxMs = 5 * 60_000): number {
   const raw = Math.min(maxMs, baseMs * 2 ** Math.max(0, attempt - 1));

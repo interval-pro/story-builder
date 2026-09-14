@@ -200,36 +200,6 @@ export function validateReviewDocument(document: ReviewDocument, size?: TaskSize
   return problems;
 }
 
-/**
- * The short version, as markdown.
- *
- * Kept beside the full renderer so the two cannot drift into describing
- * different documents.
- */
-export function renderReviewBrief(document: ReviewDocument): string {
-  const brief = document.brief;
-  if (!brief) return document.summary.trim();
-  const parts = [`# ${brief.headline.trim()}`, '', brief.approach.trim()];
-  if (brief.changes.length > 0) {
-    parts.push('', '## What changes', '', ...brief.changes.map((line) => `- ${line}`));
-  }
-  if (brief.watchOut.length > 0) {
-    parts.push('', '## Worth knowing', '', ...brief.watchOut.map((line) => `- ${line}`));
-  }
-  if (brief.effort.trim()) parts.push('', `Size: ${brief.effort.trim()}`);
-  if (document.decisions.length > 0) {
-    parts.push(
-      '',
-      '## Decisions for you',
-      '',
-      ...document.decisions.map(
-        (decision) => `- ${decision.blocking ? '**Blocking.** ' : ''}${decision.question}`,
-      ),
-    );
-  }
-  return parts.join('\n');
-}
-
 /** Renders the review as markdown for human reading and for agent prompts. */
 export function renderReviewMarkdown(document: ReviewDocument): string {
   const parts: string[] = [];

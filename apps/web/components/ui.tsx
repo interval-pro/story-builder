@@ -135,10 +135,6 @@ export function Tile({
   );
 }
 
-export function Meta({ children }: { children: ReactNode }) {
-  return <div className="meta">{children}</div>;
-}
-
 export function Bar({ percent, tone }: { percent: number; tone?: 'positive' | 'caution' | 'critical' }) {
   return (
     <div className="bar">
